@@ -1,0 +1,90 @@
+name: Build & Release APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+
+      - name: Make Gradlew Executable
+        run: chmod +x gradlew
+
+      - name: Build APKs (Release & Debug)
+        run: ./gradlew assembleRelease assembleDebug --no-daemon --stacktrace
+
+      - name: Prepare APK Output
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/release/app-release.apk out/Snapedit-Release.apk
+          cp app/build/outputs/apk/debug/app-debug.apk out/Snapedit-Debug.apk
+          cp out/Snapedit-Release.apk out/Snapedit.apk
+
+      - name: Upload Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Snapedit-Release-APK
+          path: out/Snapedit-Release.apk
+          retention-days: 14
+
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Snapedit-Debug-APK
+          path: out/Snapedit-Debug.apk
+          retention-days: 14
+
+      - name: Point latest tag to current commit
+        if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/') != true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f latest ${{ github.sha }}
+          git push -f origin latest || true
+
+      - name: Create or Update GitHub Release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && format('Snapedit {0}', github.ref_name) || 'Snapedit (Latest Build)' }}
+          body: |
+            Automated build from commit ${{ github.sha }}
+            
+            ### Included Builds:
+            - **Snapedit.apk** / **Snapedit-Release.apk**: Optimized signed release build (recommended for regular use).
+            - **Snapedit-Debug.apk**: Debug build with full logging and debug symbols.
+          files: |
+            out/Snapedit-Release.apk
+            out/Snapedit-Debug.apk
+            out/Snapedit.apk
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
