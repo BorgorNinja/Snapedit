@@ -1366,8 +1366,8 @@ fun exifInfo(ctx: Context, uri: Uri): String = runCatching {
         val lines = ArrayList<String>()
         val cam = listOfNotNull(e.getAttribute(ExifInterface.TAG_MAKE), e.getAttribute(ExifInterface.TAG_MODEL)).joinToString(" ")
         if (cam.isNotBlank()) lines.add(cam)
-        e.getAttribute(ExifInterface.TAG_LENS_MODEL)?.let { lines.add(it) }
-        val iso = e.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)
+        e.getAttribute("LensModel")?.let { lines.add(it) }
+        val iso = e.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS) ?: e.getAttribute("PhotographicSensitivity")
         val et = e.getAttributeDouble(ExifInterface.TAG_EXPOSURE_TIME, 0.0)
         val fn = e.getAttributeDouble(ExifInterface.TAG_F_NUMBER, 0.0)
         val fl = e.getAttributeDouble(ExifInterface.TAG_FOCAL_LENGTH, 0.0)
