@@ -3,6 +3,7 @@ package app.snapedit
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.media.ExifInterface
@@ -11,6 +12,7 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.annotation.DrawableRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -53,9 +55,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -71,11 +77,28 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sign
 
-private val BG = Color(0xFF121212)
-private val BAR = Color(0xFF212121)
-private val ACC = Color(0xFF4DA3FF)
-private val TXT = Color(0xFFEEEEEE)
-private val DIM = Color(0xFF8A8A8A)
+/** Theme state: 0 = follow system, 1 = dark, 2 = light. */
+object Pal {
+    var mode by mutableIntStateOf(0)
+    var sys by mutableStateOf(true)
+    val dark: Boolean get() = when (mode) { 0 -> sys; 1 -> true; else -> false }
+    fun set(ctx: Context, m: Int) {
+        mode = m
+        ctx.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putInt("theme", m).apply()
+    }
+}
+
+private val BG: Color get() = if (Pal.dark) Color(0xFF121212) else Color(0xFFF4F5F7)
+private val BAR: Color get() = if (Pal.dark) Color(0xFF212121) else Color(0xFFFFFFFF)
+private val ACC: Color get() = if (Pal.dark) Color(0xFF4DA3FF) else Color(0xFF1F6FEB)
+private val ONACC: Color get() = if (Pal.dark) Color(0xFF0B1B2E) else Color(0xFFFFFFFF)
+private val TXT: Color get() = if (Pal.dark) Color(0xFFEEEEEE) else Color(0xFF1C1E21)
+private val DIM: Color get() = if (Pal.dark) Color(0xFF8A8A8A) else Color(0xFF6B7280)
+private val CHIP: Color get() = if (Pal.dark) Color(0xFF3A3A3A) else Color(0xFFE5E7EB)
+private val STAGE: Color get() = if (Pal.dark) Color(0xFF0A0A0A) else Color(0xFFE9EBEF)
+private val TILE: Color get() = if (Pal.dark) Color(0xFF333333) else Color(0xFFDDE1E6)
+private val GRID: Color get() = if (Pal.dark) Color(0xFF3A3A3A) else Color(0xFFCDD2D9)
+private val CURVEBG: Color get() = if (Pal.dark) Color(0xFF181818) else Color(0xFFFFFFFF)
 
 class MainActivity : ComponentActivity() {
     var incoming by mutableStateOf<Uri?>(null)
@@ -84,7 +107,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         incoming = uriFrom(intent)
-        setContent { MaterialTheme(colorScheme = darkColorScheme()) { App(this) } }
+        Pal.mode = getSharedPreferences("settings", MODE_PRIVATE).getInt("theme", 0)
+        Pal.sys = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        setContent {
+            val sysDark = isSystemInDarkTheme()
+            SideEffect { Pal.sys = sysDark }
+            MaterialTheme(colorScheme = if (Pal.dark) darkColorScheme() else lightColorScheme()) { App(this) }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -235,6 +264,12 @@ fun App(act: MainActivity) {
     var expScale by remember { mutableIntStateOf(100) }
     val ops = hist[hi.coerceIn(0, hist.lastIndex)]
     val tool = active
+    val view = LocalView.current
+    SideEffect {
+        val c = WindowCompat.getInsetsController(act.window, view)
+        c.isAppearanceLightStatusBars = !Pal.dark
+        c.isAppearanceLightNavigationBars = !Pal.dark
+    }
 
     fun toast(s: String) = Toast.makeText(ctx, s, Toast.LENGTH_SHORT).show()
 
@@ -738,31 +773,38 @@ fun App(act: MainActivity) {
         Row(
             Modifier.fillMaxWidth().height(52.dp).background(BAR).padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(20.dp)
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             if (tool == null) {
-                Txt("OPEN", Modifier.clickable { pick() }, ACC, 15, true)
+                Row(
+                    Modifier.clickable { pick() }.padding(vertical = 8.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Ico(Ic.open, ACC, 22.dp)
+                    Txt("OPEN", Modifier, ACC, 15, true)
+                }
                 Spacer(Modifier.weight(1f))
                 if (prev != null) {
-                    Txt("↶", Modifier.clickable(enabled = hi > 0) { hi-- }, if (hi > 0) TXT else DIM, 26)
-                    Txt("↷", Modifier.clickable(enabled = hi < hist.lastIndex) { hi++ }, if (hi < hist.lastIndex) TXT else DIM, 26)
-                    Txt("◧", Modifier.pointerInput(Unit) {
+                    Ico(Ic.undo, if (hi > 0) TXT else DIM, 26.dp, Modifier.clickable(enabled = hi > 0) { hi-- }.padding(6.dp))
+                    Ico(Ic.redo, if (hi < hist.lastIndex) TXT else DIM, 26.dp, Modifier.clickable(enabled = hi < hist.lastIndex) { hi++ }.padding(6.dp))
+                    Ico(Ic.compare, TXT, 26.dp, Modifier.pointerInput(Unit) {
                         detectTapGestures(onPress = { comparing = true; tryAwaitRelease(); comparing = false })
-                    }, TXT, 26)
-                    Txt("▥", Modifier.clickable { histoMode = (histoMode + 1) % 3 }, if (histoMode > 0) ACC else TXT, 26)
-                    Txt("☰", Modifier.clickable { showStack = !showStack }, if (showStack) ACC else TXT, 26)
+                    }.padding(6.dp))
+                    Ico(Ic.histogram, if (histoMode > 0) ACC else TXT, 26.dp, Modifier.clickable { histoMode = (histoMode + 1) % 3 }.padding(6.dp))
+                    Ico(Ic.layers, if (showStack) ACC else TXT, 26.dp, Modifier.clickable { showStack = !showStack }.padding(6.dp))
                 }
             } else {
                 Txt(tool.label, Modifier, TXT, 17, true)
                 Spacer(Modifier.weight(1f))
-                if (zoom > 1f) Txt("⤢ reset zoom", Modifier.clickable { zoom = 1f; pan = Offset.Zero }, ACC, 13, true)
-                Txt("▥", Modifier.clickable { histoMode = (histoMode + 1) % 3 }, if (histoMode > 0) ACC else TXT, 24)
+                if (zoom > 1f) Ico(Ic.fit, ACC, 24.dp, Modifier.clickable { zoom = 1f; pan = Offset.Zero }.padding(6.dp))
+                Ico(Ic.histogram, if (histoMode > 0) ACC else TXT, 24.dp, Modifier.clickable { histoMode = (histoMode + 1) % 3 }.padding(6.dp))
             }
         }
 
         // Image area
         Box(
-            Modifier.weight(1f).fillMaxWidth().background(Color(0xFF0A0A0A))
+            Modifier.weight(1f).fillMaxWidth().background(STAGE)
                 .onSizeChanged { boxSize = it }
                 .pointerInput(Unit) {
                     // two-finger pinch zoom + pan (consumed first so tools don't react)
@@ -800,7 +842,7 @@ fun App(act: MainActivity) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Txt("＋", Modifier, DIM, 64)
+                    Ico(Ic.plus, DIM, 56.dp)
                     Txt("Tap to open a photo", Modifier.padding(top = 8.dp), DIM, 15)
                     Txt("or drag one in", Modifier, DIM, 13)
                 }
@@ -921,10 +963,10 @@ fun App(act: MainActivity) {
                             Txt(
                                 "${p.name} ${fmt(tool, p, live[p.name] ?: p.def)}",
                                 Modifier
-                                    .background(if (on) ACC else Color(0xFF3A3A3A), RoundedCornerShape(16.dp))
+                                    .background(if (on) ACC else CHIP, RoundedCornerShape(16.dp))
                                     .clickable { pIdx = i }
                                     .padding(horizontal = 12.dp, vertical = 7.dp),
-                                if (on) Color.Black else TXT, 13, true
+                                if (on) ONACC else TXT, 13, true
                             )
                         }
                     }
@@ -945,31 +987,40 @@ fun App(act: MainActivity) {
                         Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Txt("✕", Modifier.clickable { active = null }.padding(8.dp), TXT, 26)
+                        Ico(Ic.close, TXT, 26.dp, Modifier.clickable { active = null }.padding(8.dp))
                         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                             when (tool.kind) {
-                                "brush", "heal", "select", "liquify", "redeye" -> Txt(
-                                    if (tool.kind == "select") "tap: add/select · UNDO removes point" else "paint on photo · UNDO",
-                                    Modifier.clickable { undoTouch() }.padding(8.dp), ACC, 12, true
-                                )
+                                "brush", "heal", "select", "liquify", "redeye" -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Ico(Ic.undo, ACC, 20.dp, Modifier.clickable { undoTouch() }.padding(8.dp))
+                                    Txt(if (tool.kind == "select") "tap to add or select a point" else "touch the photo", Modifier, DIM, 12)
+                                }
                                 "crop" -> Txt("drag the handles", Modifier, DIM, 12)
                                 "radial" -> Txt("drag to place · drag dots to resize", Modifier, DIM, 12)
                                 "pick" -> Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (tool.id == "wb") Txt("✦ AUTO", Modifier.clickable { autoWb() }.padding(8.dp), ACC, 13, true)
+                                    if (tool.id == "wb") Row(Modifier.clickable { autoWb() }.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Ico(Ic.sparkle, ACC, 18.dp)
+                                        Txt("AUTO", Modifier, ACC, 13, true)
+                                    }
                                     Txt(if (tool.id == "wb") "or tap a neutral spot" else "tap photo to pick a color", Modifier, DIM, 12)
                                 }
                                 "curves" -> Txt("drag to bend · double-tap a point to remove", Modifier, DIM, 12)
                                 "grad" -> Txt("drag to place gradient · drag dots to adjust", Modifier, DIM, 12)
-                                else -> if (tool.id == "text") Txt("✎ Edit text", Modifier.clickable { textDialog = true }.padding(8.dp), ACC, 13, true)
-                                else if (tool.id == "light") Txt("✦ AUTO TONE", Modifier.clickable { autoTone() }.padding(8.dp), ACC, 13, true)
-                                else Txt("swipe ↔ adjust  ·  ↕ switch", Modifier, DIM, 12)
+                                else -> if (tool.id == "text") Row(Modifier.clickable { textDialog = true }.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Ico(Ic.pen, ACC, 18.dp)
+                                    Txt("Edit text", Modifier, ACC, 13, true)
+                                }
+                                else if (tool.id == "light") Row(Modifier.clickable { autoTone() }.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Ico(Ic.sparkle, ACC, 18.dp)
+                                    Txt("AUTO TONE", Modifier, ACC, 13, true)
+                                }
+                                else Txt("swipe left/right to adjust · up/down to switch", Modifier, DIM, 12)
                             }
                         }
-                        Txt("✓", Modifier.clickable {
+                        Ico(Ic.check, ACC, 28.dp, Modifier.clickable {
                             val op = liveOp
                             if (op != null && changed(op)) commit(ops + (if (op.tool == "range") op.copy(v = op.v + ("Show" to 0f)) else op))
                             active = null
-                        }.padding(8.dp), ACC, 28, true)
+                        }.padding(8.dp))
                     }
                 }
                 else -> {
@@ -1003,7 +1054,7 @@ fun App(act: MainActivity) {
                                             Modifier.clickable { openTool(t) }.padding(vertical = 8.dp),
                                             horizontalAlignment = Alignment.CenterHorizontally
                                         ) {
-                                            Txt(t.icon, Modifier, TXT, 26)
+                                            Ico(Ic.tool[t.id] ?: Ic.sparkle, TXT, 28.dp)
                                             Text(t.label, color = TXT, fontSize = 10.sp, textAlign = TextAlign.Center, maxLines = 2)
                                         }
                                     }
@@ -1013,6 +1064,12 @@ fun App(act: MainActivity) {
                                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Txt("Theme", Modifier.width(64.dp), DIM, 12)
+                                    listOf(Triple(Ic.system, "Auto", 0), Triple(Ic.moon, "Dark", 1), Triple(Ic.sun, "Light", 2)).forEach { (ic, nm, m) ->
+                                        IconChip(ic, nm, Pal.mode == m) { Pal.set(ctx, m) }
+                                    }
+                                }
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Txt("Format", Modifier.width(64.dp), DIM, 12)
                                     listOf("JPEG", "PNG", "WebP").forEachIndexed { i, nm -> Chip(nm, expFmt == i) { expFmt = i } }
@@ -1037,23 +1094,26 @@ fun App(act: MainActivity) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Button(
                                         onClick = { export(false) }, enabled = src != null,
-                                        colors = ButtonDefaults.buttonColors(containerColor = ACC, contentColor = Color.Black)
-                                    ) { Text("Save to gallery") }
+                                        colors = ButtonDefaults.buttonColors(containerColor = ACC, contentColor = ONACC)
+                                    ) { Ico(Ic.save, ONACC, 20.dp); Spacer(Modifier.width(8.dp)); Text("Save to gallery") }
                                     Button(
                                         onClick = { export(true) }, enabled = src != null,
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3A3A3A), contentColor = TXT)
-                                    ) { Text("Share") }
+                                        colors = ButtonDefaults.buttonColors(containerColor = CHIP, contentColor = TXT)
+                                    ) { Ico(Ic.share, TXT, 20.dp); Spacer(Modifier.width(8.dp)); Text("Share") }
                                 }
                             }
                         }
                     }
-                    Row(Modifier.fillMaxWidth().height(48.dp)) {
-                        listOf("LOOKS", "TOOLS", "EXPORT").forEachIndexed { i, s ->
+                    Row(Modifier.fillMaxWidth().height(58.dp)) {
+                        listOf("LOOKS" to Ic.sparkle, "TOOLS" to (Ic.tool["tune"] ?: Ic.sparkle), "EXPORT" to Ic.share).forEachIndexed { i, (s, ic) ->
                             Box(
                                 Modifier.weight(1f).fillMaxHeight().clickable { tab = i },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Txt(s, Modifier, if (tab == i) ACC else DIM, 14, true)
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Ico(ic, if (tab == i) ACC else DIM, 22.dp)
+                                    Txt(s, Modifier, if (tab == i) ACC else DIM, 11, true)
+                                }
                                 if (tab == i) Box(
                                     Modifier.align(Alignment.BottomCenter).fillMaxWidth(0.4f).height(3.dp).background(ACC)
                                 )
@@ -1128,8 +1188,8 @@ fun LooksRow(
     ) {
         item {
             Column(Modifier.clickable { onSave() }, horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(110.dp).background(Color(0xFF333333)), contentAlignment = Alignment.Center) {
-                    Txt("＋", Modifier, ACC, 36, true)
+                Box(Modifier.size(110.dp).background(TILE), contentAlignment = Alignment.Center) {
+                    Ico(Ic.plus, ACC, 36.dp)
                 }
                 Txt("Save look", Modifier.padding(top = 6.dp), TXT, 12)
             }
@@ -1145,8 +1205,11 @@ fun LooksRow(
             ) {
                 val t = thumbs.getOrNull(i)
                 if (t != null) Image(t.asImageBitmap(), null, Modifier.size(110.dp), contentScale = ContentScale.Crop)
-                else Box(Modifier.size(110.dp).background(Color(0xFF333333)))
-                Txt(if (isUser) "★ ${l.first}" else l.first, Modifier.padding(top = 6.dp), TXT, 12)
+                else Box(Modifier.size(110.dp).background(TILE))
+                Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (isUser) Ico(Ic.star, ACC, 12.dp, Modifier.padding(end = 4.dp))
+                    Txt(l.first, Modifier, TXT, 12)
+                }
             }
         }
     }
@@ -1169,9 +1232,9 @@ fun StackPanel(
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Txt("Edits", Modifier.weight(1f), TXT, 16, true)
-            Txt("INFO", Modifier.clickable { onInfo() }.padding(8.dp), TXT, 12, true)
-            Txt("COPY", Modifier.clickable { onCopy() }.padding(8.dp), TXT, 12, true)
-            Txt("PASTE", Modifier.clickable { onPaste() }.padding(8.dp), TXT, 12, true)
+            Ico(Ic.info, TXT, 22.dp, Modifier.clickable { onInfo() }.padding(8.dp))
+            Ico(Ic.copy, TXT, 22.dp, Modifier.clickable { onCopy() }.padding(8.dp))
+            Ico(Ic.paste, TXT, 22.dp, Modifier.clickable { onPaste() }.padding(8.dp))
             Txt("DONE", Modifier.clickable { onClose() }.padding(8.dp), ACC, 14, true)
         }
         Column(Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
@@ -1183,12 +1246,12 @@ fun StackPanel(
                         .height(rowH)
                         .offset { IntOffset(0, if (i == dragging) dy.roundToInt() else 0) }
                         .zIndex(if (i == dragging) 1f else 0f)
-                        .background(if (i == dragging) Color(0xFF3A3A3A) else BAR)
+                        .background(if (i == dragging) CHIP else BAR)
                         .padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Txt(
-                        "≡",
+                    Ico(
+                        Ic.drag, DIM, 24.dp,
                         Modifier.pointerInput(ops, i) {
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { dragging = i; dy = 0f },
@@ -1204,11 +1267,10 @@ fun StackPanel(
                                 },
                                 onDragCancel = { dragging = -1; dy = 0f }
                             )
-                        }.padding(end = 16.dp, top = 8.dp, bottom = 8.dp),
-                        DIM, 24
+                        }.padding(end = 16.dp)
                     )
                     Txt(Tools.byId(op.tool).label, Modifier.weight(1f), TXT, 15)
-                    Txt("✕", Modifier.clickable { onChange(ops.filterIndexed { j, _ -> j != i }) }.padding(8.dp), DIM, 20)
+                    Ico(Ic.close, DIM, 20.dp, Modifier.clickable { onChange(ops.filterIndexed { j, _ -> j != i }) }.padding(8.dp))
                 }
             }
         }
@@ -1220,9 +1282,9 @@ fun StackPanel(
 fun Chip(label: String, on: Boolean, onClick: () -> Unit) =
     Txt(
         label,
-        Modifier.background(if (on) ACC else Color(0xFF3A3A3A), RoundedCornerShape(16.dp)).clickable(onClick = onClick)
+        Modifier.background(if (on) ACC else CHIP, RoundedCornerShape(16.dp)).clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp),
-        if (on) Color.Black else TXT, 13, true
+        if (on) ONACC else TXT, 13, true
     )
 
 @Composable
@@ -1266,7 +1328,7 @@ fun CurveEditor(pts: List<Float>, ch: Int, onChange: (List<Float>) -> Unit, modi
     val col = listOf(Color.White, Color(0xFFFF5252), Color(0xFF66BB6A), Color(0xFF42A5F5))[ch.coerceIn(0, 3)]
     Canvas(
         modifier
-            .background(Color(0xFF181818))
+            .background(CURVEBG)
             .pointerInput(ch) {
                 var work = listOf<Float>()
                 var idx = -1
@@ -1332,10 +1394,10 @@ fun CurveEditor(pts: List<Float>, ch: Int, onChange: (List<Float>) -> Unit, modi
         val w = size.width
         val h = size.height
         for (k in 1..3) {
-            drawLine(Color(0xFF333333), Offset(w * k / 4f, 0f), Offset(w * k / 4f, h), 1f)
-            drawLine(Color(0xFF333333), Offset(0f, h * k / 4f), Offset(w, h * k / 4f), 1f)
+            drawLine(GRID, Offset(w * k / 4f, 0f), Offset(w * k / 4f, h), 1f)
+            drawLine(GRID, Offset(0f, h * k / 4f), Offset(w, h * k / 4f), 1f)
         }
-        drawLine(Color(0xFF444444), Offset(0f, h), Offset(w, 0f), 1f)
+        drawLine(GRID, Offset(0f, h), Offset(w, 0f), 1f)
         val lut = Engine.curveLut(pts)
         for (i in 0 until 255) {
             drawLine(col, Offset(i / 255f * w, h - lut[i] / 255f * h), Offset((i + 1) / 255f * w, h - lut[i + 1] / 255f * h), 3f)
@@ -1403,4 +1465,22 @@ fun ClipOverlay(bm: Bitmap, modifier: Modifier) {
     }
     val o = ov
     if (o != null) Image(o.asImageBitmap(), null, modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+}
+
+
+@Composable
+fun Ico(@DrawableRes id: Int, tint: Color = TXT, size: Dp = 24.dp, modifier: Modifier = Modifier) =
+    Icon(painterResource(id), contentDescription = null, tint = tint, modifier = modifier.size(size))
+
+@Composable
+fun IconChip(@DrawableRes icon: Int, label: String, on: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.background(if (on) ACC else CHIP, RoundedCornerShape(16.dp)).clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Ico(icon, if (on) ONACC else TXT, 16.dp)
+        Txt(label, Modifier, if (on) ONACC else TXT, 13, true)
+    }
 }

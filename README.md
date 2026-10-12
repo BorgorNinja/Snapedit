@@ -67,6 +67,7 @@ Every edit in Snapedit is non-destructive: every slider, tone curve point, brush
 ### 6. Workflow, Stacks & Looks
 * **Non-destructive Edit Stack:** View the full layer stack of applied tools; toggle visibility of any past adjustment or re-enter and refine past parameters without losing subsequent edits.
 * **User Looks (Presets):** Save your active adjustment recipes to the device and apply them to any subsequent photo in one tap.
+* **Dynamic Theming:** Seamless system, dark, and light mode themes with custom runtime-tinted monochrome vector iconography.
 * **Before / After Comparison:** Long-press anywhere on the preview canvas to toggle instant real-time before/after comparison.
 
 ---
