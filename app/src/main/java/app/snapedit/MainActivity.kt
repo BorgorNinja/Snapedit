@@ -544,6 +544,13 @@ fun App(act: MainActivity) {
         }
     }
 
+    // Auto-scroll parameter chips to keep active chip centered/visible
+    LaunchedEffect(pIdx, tool?.id) {
+        if (vp.isNotEmpty() && pIdx in vp.indices) {
+            paramListState.animateScrollToItem((pIdx - 1).coerceAtLeast(0))
+        }
+    }
+
     // Color Mixer: Hue/Sat/Lum sliders edit the currently selected color band
     LaunchedEffect(tool?.id, live["Band"], live["Hue"], live["Saturation"], live["Luminance"]) {
         if (tool != null && tool.id == "hsl") {
@@ -586,8 +593,9 @@ fun App(act: MainActivity) {
                     val cur = live[p.name] ?: p.def
                     if (p.max - p.min <= 7f) {
                         accX += d.x
-                        if (abs(accX) > 60f) {
-                            live[p.name] = (cur + sign(accX)).coerceIn(p.min, p.max)
+                        if (abs(accX) > hStepPx) {
+                            val nxt = (cur + sign(accX)).coerceIn(p.min, p.max)
+                            if (nxt != cur) { live[p.name] = nxt; tick() }
                             accX = 0f
                         }
                     } else {
@@ -595,8 +603,9 @@ fun App(act: MainActivity) {
                     }
                 } else {
                     accY += d.y
-                    if (abs(accY) > 70f) {
-                        pIdx = (pIdx + (if (accY > 0) 1 else -1)).coerceIn(0, vp.lastIndex)
+                    if (abs(accY) > vStepPx) {
+                        val nxt = (pIdx + (if (accY > 0) 1 else -1)).coerceIn(0, vp.lastIndex)
+                        if (nxt != pIdx) { pIdx = nxt; tick() }
                         accY = 0f
                     }
                 }
@@ -606,11 +615,17 @@ fun App(act: MainActivity) {
     // ----- per-tool input -----
     val inputMod: Modifier = if (tool == null) Modifier else when (tool.kind) {
         "brush" -> Modifier.pointerInput(tool) {
-            detectDragGestures(onDragStart = { o ->
-                val n = norm(o)
-                if (n != null) strokes.add(BrushStroke(listOf(n.x, n.y), (live["Size"] ?: 15f) / 100f * 0.2f, (live["Erase"] ?: 0f) > 0.5f))
-            }) { change, _ ->
+            detectDragGestures(
+                onDragStart = { o ->
+                    touchPos = o
+                    val n = norm(o)
+                    if (n != null) strokes.add(BrushStroke(listOf(n.x, n.y), (live["Size"] ?: 15f) / 100f * 0.2f, (live["Erase"] ?: 0f) > 0.5f))
+                },
+                onDragEnd = { touchPos = null },
+                onDragCancel = { touchPos = null }
+            ) { change, _ ->
                 change.consume()
+                touchPos = change.position
                 val n = norm(change.position)
                 val i = strokes.lastIndex
                 if (n != null && i >= 0) strokes[i] = strokes[i].copy(pts = strokes[i].pts + listOf(n.x, n.y))
@@ -620,10 +635,10 @@ fun App(act: MainActivity) {
             .pointerInput(tool) {
                 detectTapGestures { o ->
                     val hit = hitPt(o)
-                    if (hit >= 0) selectPt(hit)
+                    if (hit >= 0) { tick(); selectPt(hit) }
                     else {
                         val n = norm(o)
-                        if (n != null && pts.size < 8) addPt(n)
+                        if (n != null && pts.size < 8) { tick(); addPt(n) }
                     }
                 }
             }
@@ -644,13 +659,20 @@ fun App(act: MainActivity) {
         "heal" -> Modifier
             .pointerInput(tool) {
                 detectTapGestures { o ->
+                    touchPos = o
                     val n = norm(o)
-                    if (n != null) spots.add(Spot(n.x, n.y, (live["Size"] ?: 20f) / 100f * 0.12f))
+                    if (n != null) { tick(); spots.add(Spot(n.x, n.y, (live["Size"] ?: 20f) / 100f * 0.12f)) }
+                    scope.launch { delay(280); touchPos = null }
                 }
             }
             .pointerInput(tool) {
-                detectDragGestures { change, _ ->
+                detectDragGestures(
+                    onDragStart = { o -> touchPos = o },
+                    onDragEnd = { touchPos = null },
+                    onDragCancel = { touchPos = null }
+                ) { change, _ ->
                     change.consume()
+                    touchPos = change.position
                     val n = norm(change.position)
                     if (n != null) {
                         val r = (live["Size"] ?: 20f) / 100f * 0.12f
@@ -690,8 +712,13 @@ fun App(act: MainActivity) {
         }
         "liquify" -> Modifier
             .pointerInput(tool) {
-                detectDragGestures(onDragStart = { warpMarks.add(warps.size) }) { change, d ->
+                detectDragGestures(
+                    onDragStart = { o -> touchPos = o; warpMarks.add(warps.size) },
+                    onDragEnd = { touchPos = null },
+                    onDragCancel = { touchPos = null }
+                ) { change, d ->
                     change.consume()
+                    touchPos = change.position
                     val bm = base
                     val n = norm(change.position)
                     if (bm != null && n != null) {
@@ -706,12 +733,15 @@ fun App(act: MainActivity) {
             }
             .pointerInput(tool) {
                 detectTapGestures { o ->
+                    touchPos = o
                     val n = norm(o)
                     val mode = (live["Mode"] ?: 0f).roundToInt()
                     if (n != null && mode > 0) {
+                        tick()
                         warpMarks.add(warps.size)
                         warps.add(Warp(n.x, n.y, 0f, 0f, (live["Size"] ?: 25f) / 100f * 0.2f, mode, (live["Strength"] ?: 50f) / 100f * 0.3f))
                     }
+                    scope.launch { delay(280); touchPos = null }
                 }
             }
         "crop" -> Modifier.pointerInput(tool) {
@@ -763,6 +793,7 @@ fun App(act: MainActivity) {
                     val n = norm(o)
                     val c = if (n != null) sample(n) else null
                     if (c != null) {
+                        tick()
                         if (tool.id == "wb") {
                             val r = Engine.wbFrom(c[0], c[1], c[2])
                             live["Temperature"] = r[0]; live["Tint"] = r[1]
@@ -786,8 +817,10 @@ fun App(act: MainActivity) {
             .then(swipeMod)
         "redeye" -> Modifier.pointerInput(tool) {
             detectTapGestures { o ->
+                touchPos = o
                 val n = norm(o)
-                if (n != null) spots.add(Spot(n.x, n.y, (live["Size"] ?: 15f) / 100f * 0.12f))
+                if (n != null) { tick(); spots.add(Spot(n.x, n.y, (live["Size"] ?: 15f) / 100f * 0.12f)) }
+                scope.launch { delay(280); touchPos = null }
             }
         }
         "radial" -> Modifier.pointerInput(tool) {
@@ -831,7 +864,25 @@ fun App(act: MainActivity) {
                 }
             }
         }
-        else -> swipeMod
+        else -> if (tool.id == "text") {
+            Modifier
+                .pointerInput(tool) {
+                    detectTapGestures(onDoubleTap = { tick(); textDialog = true })
+                }
+                .pointerInput(tool) {
+                    detectDragGestures { change, d ->
+                        change.consume()
+                        val bm = base
+                        if (bm != null) {
+                            val f = fit(boxSize.width.toFloat(), boxSize.height.toFloat(), bm.width, bm.height)
+                            val x = live["X"] ?: 50f
+                            val y = live["Y"] ?: 50f
+                            live["X"] = (x + d.x / zoom / f[2] * 100f).coerceIn(2f, 98f)
+                            live["Y"] = (y + d.y / zoom / f[3] * 100f).coerceIn(5f, 95f)
+                        }
+                    }
+                }
+        } else swipeMod
     }
 
     Column(
@@ -1043,7 +1094,29 @@ fun App(act: MainActivity) {
                             drawCircle(col, p.r * min(f[2], f[3]), c, style = Stroke(3f))
                             drawCircle(col, 9f, c)
                         }
+                    } else if (tool.id == "text" && textValue.isNotBlank()) {
+                        val tx = f[0] + (live["X"] ?: 50f) / 100f * f[2]
+                        val ty = f[1] + (live["Y"] ?: 50f) / 100f * f[3]
+                        drawCircle(Color(0xFF4DA3FF), 10f, Offset(tx, ty))
+                        drawCircle(Color.White, 14f, Offset(tx, ty), style = Stroke(2.5f))
                     }
+                }
+            }
+            // Brush / Heal / Liquify / Red-eye screen-space size ghost circle under finger
+            val tp = touchPos
+            if (tool != null && bm != null && tp != null && !comparing && tool.kind in listOf("brush", "heal", "liquify", "redeye")) {
+                Canvas(Modifier.fillMaxSize().zIndex(3f)) {
+                    val f = fit(size.width, size.height, bm.width, bm.height)
+                    val m = min(f[2], f[3])
+                    val r = when (tool.kind) {
+                        "brush" -> (live["Size"] ?: 15f) / 100f * 0.2f * m * zoom
+                        "heal" -> (live["Size"] ?: 20f) / 100f * 0.12f * m * zoom
+                        "liquify" -> (live["Size"] ?: 25f) / 100f * 0.2f * m * zoom
+                        else -> (live["Size"] ?: 15f) / 100f * 0.12f * m * zoom
+                    }.coerceAtLeast(6f)
+                    drawCircle(Color(0x334DA3FF), r, tp)
+                    drawCircle(Color.White, r, tp, style = Stroke(3f))
+                    drawCircle(Color(0xFF4DA3FF), 4f, tp)
                 }
             }
             // PicsArt-style Before/After split-wipe divider & handle
@@ -1195,8 +1268,33 @@ fun App(act: MainActivity) {
                                 }
                                 CurveEditor(curvePts[chn], chn, { curvePts[chn] = it }, Modifier.padding(12.dp).fillMaxWidth().height(170.dp))
                             } else {
+                                if (tool.id == "text") {
+                                    val cIdx = (live["Color"] ?: 0f).roundToInt().coerceIn(0, 5)
+                                    val swatchCols = listOf(
+                                        Color(0xFFFFFFFF), Color(0xFF000000), Color(0xFFFFEB3B),
+                                        Color(0xFFF44336), Color(0xFF2196F3), Color(0xFF4CAF50)
+                                    )
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Txt("Color", Modifier, DIM, 12, true)
+                                        swatchCols.forEachIndexed { idx, sw ->
+                                            val selCol = idx == cIdx
+                                            Box(
+                                                Modifier
+                                                    .size(24.dp)
+                                                    .pressScale { tick(); live["Color"] = idx.toFloat() }
+                                                    .background(sw, CircleShape)
+                                                    .border(if (selCol) 2.5.dp else 1.dp, if (selCol) ACC else DIM, CircleShape)
+                                            )
+                                        }
+                                    }
+                                }
                                 LazyRow(
-                                    Modifier.fillMaxWidth().padding(top = 10.dp),
+                                    state = paramListState,
+                                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                                     contentPadding = PaddingValues(horizontal = 12.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
@@ -1219,7 +1317,11 @@ fun App(act: MainActivity) {
                                     val discrete = p.max - p.min <= 7f
                                     Slider(
                                         value = live[p.name] ?: p.def,
-                                        onValueChange = { live[p.name] = if (discrete) it.roundToInt().toFloat() else it },
+                                        onValueChange = {
+                                            val nv = if (discrete) it.roundToInt().toFloat() else it
+                                            if (discrete && nv != (live[p.name] ?: p.def)) tick()
+                                            live[p.name] = nv
+                                        },
                                         valueRange = p.min..p.max,
                                         steps = if (discrete && p.max - p.min > 1f) (p.max - p.min).toInt() - 1 else 0,
                                         colors = SliderDefaults.colors(thumbColor = ACC, activeTrackColor = ACC),
@@ -1251,7 +1353,7 @@ fun App(act: MainActivity) {
                                         "grad" -> Txt("drag to place gradient · drag dots to adjust", Modifier, DIM, 12)
                                         else -> if (tool.id == "text") Row(Modifier.pressScale { tick(); textDialog = true }.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                             Ico(Ic.pen, ACC, 18.dp)
-                                            Txt("Edit text", Modifier, ACC, 13, true)
+                                            Txt("Edit text · drag photo to move", Modifier, ACC, 12, true)
                                         }
                                         else if (tool.id == "light") Row(Modifier.pressScale { tick(); autoTone() }.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                             Ico(Ic.sparkle, ACC, 18.dp)
@@ -1452,11 +1554,17 @@ fun LooksRow(
     onDelete: (String) -> Unit
 ) {
     val all = Tools.looks + user
-    val thumbs by produceState<List<Bitmap>>(emptyList(), prev, ops, user) {
+    val activeIdx = remember(ops, all) {
+        all.indexOfFirst { it.second.isNotEmpty() && ops.size >= it.second.size && ops.takeLast(it.second.size) == it.second }
+    }
+    val baseOps = remember(ops, activeIdx, all) {
+        if (activeIdx in all.indices) ops.dropLast(all[activeIdx].second.size) else ops
+    }
+    val thumbs by produceState<List<Bitmap>>(emptyList(), prev, baseOps, user) {
         val p = prev
         value = if (p == null) emptyList() else withContext(Dispatchers.Default) {
             val t = scaleTo(p, 180)
-            all.map { Engine.render(t, ops + it.second) }
+            all.map { Engine.render(t, baseOps + it.second) }
         }
     }
     if (prev == null) {
@@ -1470,8 +1578,8 @@ fun LooksRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         item {
-            Column(Modifier.clickable { onSave() }, horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(110.dp).background(TILE), contentAlignment = Alignment.Center) {
+            Column(Modifier.pressScale { onSave() }, horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(110.dp).clip(RoundedCornerShape(10.dp)).background(TILE), contentAlignment = Alignment.Center) {
                     Ico(Ic.plus, ACC, 36.dp)
                 }
                 Txt("Save look", Modifier.padding(top = 6.dp), TXT, 12)
@@ -1479,19 +1587,29 @@ fun LooksRow(
         }
         itemsIndexed(all) { i, l ->
             val isUser = i >= Tools.looks.size
+            val isActive = i == activeIdx
+            val borderCol by animateColorAsState(if (isActive) ACC else Color.Transparent, spring(stiffness = 600f), label = "lookBorder")
+            val lblCol by animateColorAsState(if (isActive) ACC else TXT, spring(stiffness = 600f), label = "lookLbl")
             Column(
                 Modifier.combinedClickable(
-                    onClick = { onPick(ops + l.second) },
+                    onClick = {
+                        if (isActive) onPick(baseOps)
+                        else onPick(baseOps + l.second)
+                    },
                     onLongClick = { if (isUser) onDelete(l.first) }
                 ),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 val t = thumbs.getOrNull(i)
-                if (t != null) Image(t.asImageBitmap(), null, Modifier.size(110.dp), contentScale = ContentScale.Crop)
-                else Box(Modifier.size(110.dp).background(TILE))
+                val boxMod = Modifier
+                    .size(110.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .border(2.5.dp, borderCol, RoundedCornerShape(10.dp))
+                if (t != null) Image(t.asImageBitmap(), null, boxMod, contentScale = ContentScale.Crop)
+                else Box(boxMod.background(TILE))
                 Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (isUser) Ico(Ic.star, ACC, 12.dp, Modifier.padding(end = 4.dp))
-                    Txt(l.first, Modifier, TXT, 12)
+                    Txt(l.first, Modifier, lblCol, 12, isActive)
                 }
             }
         }
