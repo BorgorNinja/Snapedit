@@ -1189,7 +1189,7 @@ fun App(act: MainActivity) {
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    Ico(Ic.compare, ONACC, 18.dp)
+                    Ico(Ic.compare, ONACC, 18.dp, Modifier, "Split Divider Handle")
                 }
             }
             if (tool != null && tool.kind != "curves" && vp.isNotEmpty()) {

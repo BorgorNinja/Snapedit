@@ -370,11 +370,11 @@ class SnapEditAutomatedTest {
         composeRule.onNodeWithContentDescription("Histogram").performClick()
         pump(300)
 
-        composeRule.onNodeWithContentDescription("Compare").performClick()
+        composeRule.onAllNodesWithContentDescription("Compare")[0].performClick()
         pump(400)
         composeRule.onNodeWithText("BEFORE").assertIsDisplayed()
         composeRule.onNodeWithText("AFTER").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Compare").performClick()
+        composeRule.onAllNodesWithContentDescription("Compare")[0].performClick()
         pump(300)
 
         // 4. Test LOOKS tab: apply built-in looks, Undo/Redo, and save a custom Look
@@ -543,7 +543,8 @@ class SnapEditAutomatedTest {
         pump(250)
         composeRule.onNodeWithTag("watermark_input").performTextInput("SnapEdit CI")
         pump(300)
-        composeRule.onNodeWithText("Save to gallery").performScrollTo().performClick()
+        composeRule.onNodeWithTag("export_scroll").performScrollToNode(hasText("Save to gallery"))
+        composeRule.onNodeWithText("Save to gallery").performClick()
 
         // Wait for background export coroutine to finish and display confirmation banner
         pumpUntil(timeoutMs = 15_000) {
