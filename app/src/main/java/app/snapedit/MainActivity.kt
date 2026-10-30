@@ -18,6 +18,31 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.*
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -27,7 +52,10 @@ import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -35,6 +63,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -44,17 +73,22 @@ import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.mimeTypes
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.core.view.WindowCompat
@@ -68,6 +102,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
@@ -219,10 +254,25 @@ fun changed(op: Op): Boolean = when (op.tool) {
     else -> op.v != Tools.op(op.tool).v
 }
 
+@Composable
+fun Modifier.pressScale(enabled: Boolean = true, onClick: () -> Unit): Modifier {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.90f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessHigh),
+        label = "pressScale"
+    )
+    return this
+        .graphicsLayer { scaleX = scale; scaleY = scale }
+        .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick)
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun App(act: MainActivity) {
     val ctx = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val hitPx = with(LocalDensity.current) { 44.dp.toPx() }
     val scope = rememberCoroutineScope()
     var src by remember { mutableStateOf<Bitmap?>(null) }
@@ -236,7 +286,12 @@ fun App(act: MainActivity) {
     var pIdx by remember { mutableIntStateOf(0) }
     val live = remember { mutableStateMapOf<String, Float>() }
     var comparing by remember { mutableStateOf(false) }
+    var splitMode by remember { mutableStateOf(false) }
+    var splitPos by remember { mutableFloatStateOf(0.5f) }
     var showStack by remember { mutableStateOf(false) }
+    var exporting by remember { mutableStateOf(false) }
+    var savedBanner by remember { mutableStateOf(false) }
+    val checkScale = remember { Animatable(1f) }
     val strokes = remember { mutableStateListOf<BrushStroke>() }
     val pts = remember { mutableStateListOf<Pt>() }
     var sel by remember { mutableIntStateOf(-1) }
@@ -272,6 +327,7 @@ fun App(act: MainActivity) {
     }
 
     fun toast(s: String) = Toast.makeText(ctx, s, Toast.LENGTH_SHORT).show()
+    fun tick() = haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 
     fun commit(n: List<Op>) {
         while (hist.size > hi + 1) hist.removeAt(hist.lastIndex)
@@ -288,12 +344,13 @@ fun App(act: MainActivity) {
             src = full; prev = p
             zoom = 1f; pan = Offset.Zero
             hist.clear(); hist.add(emptyList()); hi = 0
-            active = null; showStack = false
+            active = null; showStack = false; splitMode = false
         }
     }
 
     fun openTool(t: Tool) {
         if (prev == null) { toast("Open a photo first"); return }
+        tick()
         live.clear()
         t.params.forEach { live[it.name] = it.def }
         strokes.clear(); pts.clear(); spots.clear(); sel = -1; textValue = ""
@@ -307,14 +364,18 @@ fun App(act: MainActivity) {
 
     fun export(share: Boolean) {
         val s = src ?: return
+        if (exporting) return
         val list = ops
+        tick()
         scope.launch {
+            exporting = true
             val uri = withContext(Dispatchers.Default) {
                 var r = Engine.render(s, list)
                 if (expScale < 100) r = Bitmap.createScaledBitmap(r, max(1, r.width * expScale / 100), max(1, r.height * expScale / 100), true)
                 if (expWm.isNotBlank()) r = watermark(r, expWm)
                 saveImage(ctx, r, expFmt, expQ.roundToInt())
             }
+            exporting = false
             if (uri == null) { toast("Save failed"); return@launch }
             if (share) {
                 val i = Intent(Intent.ACTION_SEND).apply {
@@ -323,7 +384,11 @@ fun App(act: MainActivity) {
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 act.startActivity(Intent.createChooser(i, null))
-            } else toast("Saved to Pictures/Snapedit")
+            } else {
+                savedBanner = true
+                delay(2200)
+                savedBanner = false
+            }
         }
     }
 
@@ -452,7 +517,7 @@ fun App(act: MainActivity) {
         shown = if (b == null || liveOp == null || liveOp.tool == "crop") b
         else withContext(Dispatchers.Default) { Engine.render(b, listOf(liveOp)) }
     }
-    // Crop aspect presets -> set the crop rectangle
+    // Crop aspect presets -> smoothly morph the crop rectangle
     LaunchedEffect(tool?.id, live["Aspect"]) {
         val bm = base
         if (tool != null && tool.id == "crop" && bm != null) {
@@ -463,8 +528,18 @@ fun App(act: MainActivity) {
                 var nw = 1f
                 var nh = bm.width / (rr * bm.height)
                 if (nh > 1f) { nh = 1f; nw = rr * bm.height / bm.width }
-                live["L"] = (1f - nw) / 2f; live["R"] = (1f + nw) / 2f
-                live["T"] = (1f - nh) / 2f; live["B"] = (1f + nh) / 2f
+                val tl = (1f - nw) / 2f; val tr = (1f + nw) / 2f
+                val tt = (1f - nh) / 2f; val tb = (1f + nh) / 2f
+                val l0 = live["L"] ?: 0f; val r0 = live["R"] ?: 1f
+                val t0 = live["T"] ?: 0f; val b0 = live["B"] ?: 1f
+                val anim = Animatable(0f)
+                anim.animateTo(1f, tween(240, easing = FastOutSlowInEasing)) {
+                    val u = value
+                    live["L"] = l0 + (tl - l0) * u
+                    live["R"] = r0 + (tr - r0) * u
+                    live["T"] = t0 + (tt - t0) * u
+                    live["B"] = b0 + (tb - b0) * u
+                }
             }
         }
     }
@@ -777,7 +852,7 @@ fun App(act: MainActivity) {
         ) {
             if (tool == null) {
                 Row(
-                    Modifier.clickable { pick() }.padding(vertical = 8.dp, horizontal = 4.dp),
+                    Modifier.pressScale { tick(); pick() }.padding(vertical = 8.dp, horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -786,19 +861,36 @@ fun App(act: MainActivity) {
                 }
                 Spacer(Modifier.weight(1f))
                 if (prev != null) {
-                    Ico(Ic.undo, if (hi > 0) TXT else DIM, 26.dp, Modifier.clickable(enabled = hi > 0) { hi-- }.padding(6.dp))
-                    Ico(Ic.redo, if (hi < hist.lastIndex) TXT else DIM, 26.dp, Modifier.clickable(enabled = hi < hist.lastIndex) { hi++ }.padding(6.dp))
-                    Ico(Ic.compare, TXT, 26.dp, Modifier.pointerInput(Unit) {
-                        detectTapGestures(onPress = { comparing = true; tryAwaitRelease(); comparing = false })
+                    Ico(Ic.undo, if (hi > 0) TXT else DIM, 26.dp, Modifier.pressScale(enabled = hi > 0) { tick(); hi-- }.padding(6.dp))
+                    Ico(Ic.redo, if (hi < hist.lastIndex) TXT else DIM, 26.dp, Modifier.pressScale(enabled = hi < hist.lastIndex) { tick(); hi++ }.padding(6.dp))
+                    Ico(Ic.compare, if (splitMode || comparing) ACC else TXT, 26.dp, Modifier.pointerInput(Unit) {
+                        detectTapGestures(
+                            onTap = { tick(); splitMode = !splitMode },
+                            onLongPress = { tick(); comparing = true },
+                            onPress = { tryAwaitRelease(); comparing = false }
+                        )
                     }.padding(6.dp))
-                    Ico(Ic.histogram, if (histoMode > 0) ACC else TXT, 26.dp, Modifier.clickable { histoMode = (histoMode + 1) % 3 }.padding(6.dp))
-                    Ico(Ic.layers, if (showStack) ACC else TXT, 26.dp, Modifier.clickable { showStack = !showStack }.padding(6.dp))
+                    Ico(Ic.histogram, if (histoMode > 0) ACC else TXT, 26.dp, Modifier.pressScale { tick(); histoMode = (histoMode + 1) % 3 }.padding(6.dp))
+                    Ico(Ic.layers, if (showStack) ACC else TXT, 26.dp, Modifier.pressScale { tick(); showStack = !showStack }.padding(6.dp))
                 }
             } else {
-                Txt(tool.label, Modifier, TXT, 17, true)
+                AnimatedContent(
+                    targetState = tool.label,
+                    transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(100)) },
+                    label = "toolTitle"
+                ) { lbl ->
+                    Txt(lbl, Modifier, TXT, 17, true)
+                }
                 Spacer(Modifier.weight(1f))
-                if (zoom > 1f) Ico(Ic.fit, ACC, 24.dp, Modifier.clickable { zoom = 1f; pan = Offset.Zero }.padding(6.dp))
-                Ico(Ic.histogram, if (histoMode > 0) ACC else TXT, 24.dp, Modifier.clickable { histoMode = (histoMode + 1) % 3 }.padding(6.dp))
+                if (zoom > 1f) Ico(Ic.fit, ACC, 24.dp, Modifier.pressScale { tick(); zoom = 1f; pan = Offset.Zero }.padding(6.dp))
+                Ico(Ic.compare, if (splitMode || comparing) ACC else TXT, 24.dp, Modifier.pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { tick(); splitMode = !splitMode },
+                        onLongPress = { tick(); comparing = true },
+                        onPress = { tryAwaitRelease(); comparing = false }
+                    )
+                }.padding(6.dp))
+                Ico(Ic.histogram, if (histoMode > 0) ACC else TXT, 24.dp, Modifier.pressScale { tick(); histoMode = (histoMode + 1) % 3 }.padding(6.dp))
             }
         }
 
@@ -836,25 +928,65 @@ fun App(act: MainActivity) {
             contentAlignment = Alignment.Center
         ) {
             val img = if (comparing) prev else shown
-            if (img == null) {
-                Column(
-                    Modifier.fillMaxSize().clickable { pick() },
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Ico(Ic.plus, DIM, 56.dp)
-                    Txt("Tap to open a photo", Modifier.padding(top = 8.dp), DIM, 15)
-                    Txt("or drag one in", Modifier, DIM, 13)
-                }
-            } else {
-                Image(
-                    bitmap = img.asImageBitmap(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().graphicsLayer {
-                        scaleX = zoom; scaleY = zoom; translationX = pan.x; translationY = pan.y
+            AnimatedContent(
+                targetState = img != null,
+                transitionSpec = {
+                    (fadeIn(tween(240)) + scaleIn(tween(240), initialScale = 0.96f)) togetherWith
+                        fadeOut(tween(150))
+                },
+                modifier = Modifier.fillMaxSize(),
+                label = "stageContent"
+            ) { hasImg ->
+                if (!hasImg || img == null) {
+                    val inf = rememberInfiniteTransition(label = "emptyPulse")
+                    val pulse by inf.animateFloat(
+                        initialValue = 0.94f,
+                        targetValue = 1.06f,
+                        animationSpec = infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                        label = "pulseScale"
+                    )
+                    Column(
+                        Modifier.fillMaxSize().clickable { pick() },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Ico(Ic.plus, DIM, 56.dp, Modifier.graphicsLayer { scaleX = pulse; scaleY = pulse })
+                        Txt("Tap to open a photo", Modifier.padding(top = 8.dp), DIM, 15)
+                        Txt("or drag one in", Modifier, DIM, 13)
                     }
-                )
+                } else {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Image(
+                            bitmap = img.asImageBitmap(),
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize().graphicsLayer {
+                                scaleX = zoom; scaleY = zoom; translationX = pan.x; translationY = pan.y
+                            }
+                        )
+                        val orig = prev
+                        if (splitMode && !comparing && orig != null) {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .drawWithContent {
+                                        clipRect(right = size.width * splitPos) {
+                                            this@drawWithContent.drawContent()
+                                        }
+                                    }
+                            ) {
+                                Image(
+                                    bitmap = orig.asImageBitmap(),
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.fillMaxSize().graphicsLayer {
+                                        scaleX = zoom; scaleY = zoom; translationX = pan.x; translationY = pan.y
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
             val sb = shown
             if (histoMode == 2 && sb != null && !comparing) {
@@ -914,210 +1046,361 @@ fun App(act: MainActivity) {
                     }
                 }
             }
+            // PicsArt-style Before/After split-wipe divider & handle
+            if (splitMode && !comparing && prev != null && shown != null && boxSize.width > 0) {
+                val divX = boxSize.width * splitPos
+                val handleR = with(LocalDensity.current) { 18.dp.toPx() }
+                Canvas(Modifier.fillMaxSize()) {
+                    drawLine(Color.White, Offset(divX, 0f), Offset(divX, size.height), strokeWidth = 3f)
+                }
+                Row(
+                    Modifier.align(Alignment.TopCenter).padding(top = 48.dp).fillMaxWidth().padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Txt(
+                        "BEFORE",
+                        Modifier.background(Color(0xAA000000), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
+                        Color.White, 11, true
+                    )
+                    Txt(
+                        "AFTER",
+                        Modifier.background(Color(0xAA000000), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
+                        ACC, 11, true
+                    )
+                }
+                Box(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .offset { IntOffset((divX - handleR).roundToInt(), (boxSize.height / 2f - handleR).roundToInt()) }
+                        .size(36.dp)
+                        .background(ACC, CircleShape)
+                        .border(2.dp, Color.White, CircleShape)
+                        .pointerInput(Unit) {
+                            detectHorizontalDragGestures { change, dragAmount ->
+                                change.consume()
+                                if (boxSize.width > 0) {
+                                    splitPos = (splitPos + dragAmount / boxSize.width).coerceIn(0.05f, 0.95f)
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Ico(Ic.compare, ONACC, 18.dp)
+                }
+            }
             if (tool != null && tool.kind != "curves" && vp.isNotEmpty()) {
                 val p = vp[pIdx.coerceIn(0, vp.lastIndex)]
-                Txt(
-                    "${p.name}  ${fmt(tool, p, live[p.name] ?: p.def)}",
-                    Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
-                        .background(Color(0x99000000), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    TXT, 16, true
+                Row(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 12.dp)
+                        .background(Color(0xAA000000), RoundedCornerShape(10.dp))
+                        .animateContentSize(spring(stiffness = Spring.StiffnessMedium))
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AnimatedContent(
+                        targetState = p.name,
+                        transitionSpec = {
+                            (fadeIn(tween(150)) + slideInVertically { it / 2 }) togetherWith
+                                (fadeOut(tween(100)) + slideOutVertically { -it / 2 })
+                        },
+                        label = "paramName"
+                    ) { nm ->
+                        Txt(nm, Modifier, Color.White, 15, true)
+                    }
+                    Txt(fmt(tool, p, live[p.name] ?: p.def), Modifier, ACC, 15, true)
+                }
+            }
+            AnimatedVisibility(
+                visible = exporting,
+                enter = fadeIn(tween(150)),
+                exit = fadeOut(tween(200)),
+                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
+            ) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().height(3.dp),
+                    color = ACC,
+                    trackColor = Color.Transparent
                 )
+            }
+            AnimatedVisibility(
+                visible = savedBanner,
+                enter = fadeIn(tween(180)) + slideInVertically { it },
+                exit = fadeOut(tween(180)) + slideOutVertically { it },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)
+            ) {
+                Row(
+                    Modifier
+                        .background(ACC, RoundedCornerShape(20.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Ico(Ic.check, ONACC, 18.dp)
+                    Txt("Saved to Pictures/Snapedit", Modifier, ONACC, 13, true)
+                }
             }
         }
 
         // Bottom panel
-        Column(Modifier.fillMaxWidth().background(BAR)) {
-            when {
-                showStack -> StackPanel(
-                    ops,
-                    onChange = { commit(it) },
-                    onClose = { showStack = false },
-                    onCopy = { clipOps = Presets.portable(ops); toast("Edits copied") },
-                    onPaste = { if (clipOps.isEmpty()) toast("Nothing copied") else { commit(ops + clipOps); toast("Edits pasted") } },
-                    onInfo = { infoDialog = true }
-                )
-                tool != null -> {
-                    if (tool.kind == "curves") {
-                        val chn = (live["Channel"] ?: 0f).roundToInt().coerceIn(0, 3)
-                        Row(
-                            Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            listOf("RGB", "Red", "Green", "Blue").forEachIndexed { i, nm ->
-                                Chip(nm, i == chn) { live["Channel"] = i.toFloat() }
-                            }
-                            Spacer(Modifier.weight(1f))
-                            Txt("RESET", Modifier.clickable { curvePts[chn] = listOf(0f, 0f, 1f, 1f) }.padding(6.dp), DIM, 12, true)
-                        }
-                        CurveEditor(curvePts[chn], chn, { curvePts[chn] = it }, Modifier.padding(12.dp).fillMaxWidth().height(170.dp))
-                    } else {
-                    LazyRow(
-                        Modifier.fillMaxWidth().padding(top = 10.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        itemsIndexed(vp) { i, p ->
-                            val on = i == pIdx
-                            Txt(
-                                "${p.name} ${fmt(tool, p, live[p.name] ?: p.def)}",
-                                Modifier
-                                    .background(if (on) ACC else CHIP, RoundedCornerShape(16.dp))
-                                    .clickable { pIdx = i }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                                if (on) ONACC else TXT, 13, true
-                            )
-                        }
-                    }
-                    if (vp.isNotEmpty()) {
-                        val p = vp[pIdx.coerceIn(0, vp.lastIndex)]
-                        val discrete = p.max - p.min <= 7f
-                        Slider(
-                            value = live[p.name] ?: p.def,
-                            onValueChange = { live[p.name] = if (discrete) it.roundToInt().toFloat() else it },
-                            valueRange = p.min..p.max,
-                            steps = if (discrete && p.max - p.min > 1f) (p.max - p.min).toInt() - 1 else 0,
-                            colors = SliderDefaults.colors(thumbColor = ACC, activeTrackColor = ACC),
-                            modifier = Modifier.padding(horizontal = 20.dp)
-                        )
-                    }
-                    }
-                    Row(
-                        Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Ico(Ic.close, TXT, 26.dp, Modifier.clickable { active = null }.padding(8.dp))
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            when (tool.kind) {
-                                "brush", "heal", "select", "liquify", "redeye" -> Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Ico(Ic.undo, ACC, 20.dp, Modifier.clickable { undoTouch() }.padding(8.dp))
-                                    Txt(if (tool.kind == "select") "tap to add or select a point" else "touch the photo", Modifier, DIM, 12)
-                                }
-                                "crop" -> Txt("drag the handles", Modifier, DIM, 12)
-                                "radial" -> Txt("drag to place · drag dots to resize", Modifier, DIM, 12)
-                                "pick" -> Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (tool.id == "wb") Row(Modifier.clickable { autoWb() }.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Ico(Ic.sparkle, ACC, 18.dp)
-                                        Txt("AUTO", Modifier, ACC, 13, true)
+        val panelMode = when {
+            showStack -> 2
+            tool != null -> 1
+            else -> 0
+        }
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(BAR)
+                .animateContentSize(spring(dampingRatio = Spring.DampingRatioNoBounce, stiffness = Spring.StiffnessMediumLow))
+        ) {
+            AnimatedContent(
+                targetState = panelMode,
+                transitionSpec = {
+                    (fadeIn(tween(180, easing = LinearOutSlowInEasing)) +
+                        slideInVertically(spring(dampingRatio = Spring.DampingRatioNoBounce, stiffness = 420f)) { it / 5 }) togetherWith
+                        (fadeOut(tween(120)) + slideOutVertically(tween(140)) { it / 6 })
+                },
+                label = "bottomPanel"
+            ) { mode ->
+                when (mode) {
+                    2 -> StackPanel(
+                        ops,
+                        onChange = { tick(); commit(it) },
+                        onClose = { tick(); showStack = false },
+                        onCopy = { tick(); clipOps = Presets.portable(ops); toast("Edits copied") },
+                        onPaste = {
+                            tick()
+                            if (clipOps.isEmpty()) toast("Nothing copied")
+                            else { commit(ops + clipOps); toast("Edits pasted") }
+                        },
+                        onInfo = { tick(); infoDialog = true }
+                    )
+                    1 -> if (tool != null) {
+                        Column(Modifier.fillMaxWidth()) {
+                            if (tool.kind == "curves") {
+                                val chn = (live["Channel"] ?: 0f).roundToInt().coerceIn(0, 3)
+                                Row(
+                                    Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    listOf("RGB", "Red", "Green", "Blue").forEachIndexed { i, nm ->
+                                        Chip(nm, i == chn) { tick(); live["Channel"] = i.toFloat() }
                                     }
-                                    Txt(if (tool.id == "wb") "or tap a neutral spot" else "tap photo to pick a color", Modifier, DIM, 12)
+                                    Spacer(Modifier.weight(1f))
+                                    Txt("RESET", Modifier.pressScale { tick(); curvePts[chn] = listOf(0f, 0f, 1f, 1f) }.padding(6.dp), DIM, 12, true)
                                 }
-                                "curves" -> Txt("drag to bend · double-tap a point to remove", Modifier, DIM, 12)
-                                "grad" -> Txt("drag to place gradient · drag dots to adjust", Modifier, DIM, 12)
-                                else -> if (tool.id == "text") Row(Modifier.clickable { textDialog = true }.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Ico(Ic.pen, ACC, 18.dp)
-                                    Txt("Edit text", Modifier, ACC, 13, true)
-                                }
-                                else if (tool.id == "light") Row(Modifier.clickable { autoTone() }.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Ico(Ic.sparkle, ACC, 18.dp)
-                                    Txt("AUTO TONE", Modifier, ACC, 13, true)
-                                }
-                                else Txt("swipe left/right to adjust · up/down to switch", Modifier, DIM, 12)
-                            }
-                        }
-                        Ico(Ic.check, ACC, 28.dp, Modifier.clickable {
-                            val op = liveOp
-                            if (op != null && changed(op)) commit(ops + (if (op.tool == "range") op.copy(v = op.v + ("Show" to 0f)) else op))
-                            active = null
-                        }.padding(8.dp))
-                    }
-                }
-                else -> {
-                    Box(Modifier.fillMaxWidth().height(250.dp)) {
-                        when (tab) {
-                            0 -> LooksRow(
-                                prev, ops, userPresets,
-                                onPick = { commit(it) },
-                                onSave = {
-                                    if (Presets.portable(ops).isEmpty()) toast("Make some edits first")
-                                    else { presetName = ""; saveDialog = true }
-                                },
-                                onDelete = { Presets.remove(ctx, it); userPresets = Presets.load(ctx) }
-                            )
-                            1 -> Column(Modifier.fillMaxSize()) {
+                                CurveEditor(curvePts[chn], chn, { curvePts[chn] = it }, Modifier.padding(12.dp).fillMaxWidth().height(170.dp))
+                            } else {
                                 LazyRow(
-                                    Modifier.fillMaxWidth().padding(top = 8.dp),
-                                    contentPadding = PaddingValues(horizontal = 10.dp),
+                                    Modifier.fillMaxWidth().padding(top = 10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    items(listOf("All") + Tools.cats.keys.toList()) { c -> Chip(c, c == cat) { cat = c } }
+                                    itemsIndexed(vp) { i, p ->
+                                        val on = i == pIdx
+                                        val bg by animateColorAsState(if (on) ACC else CHIP, spring(stiffness = 600f), label = "paramBg")
+                                        val fg by animateColorAsState(if (on) ONACC else TXT, spring(stiffness = 600f), label = "paramFg")
+                                        Txt(
+                                            "${p.name} ${fmt(tool, p, live[p.name] ?: p.def)}",
+                                            Modifier
+                                                .pressScale { tick(); pIdx = i }
+                                                .background(bg, RoundedCornerShape(16.dp))
+                                                .padding(horizontal = 12.dp, vertical = 7.dp),
+                                            fg, 13, true
+                                        )
+                                    }
                                 }
-                                val list = if (cat == "All") Tools.all else Tools.cats[cat].orEmpty().map { Tools.byId(it) }
-                                LazyVerticalGrid(
-                                    GridCells.Fixed(4),
-                                    Modifier.fillMaxSize(),
-                                    contentPadding = PaddingValues(8.dp)
-                                ) {
-                                    items(list) { t ->
-                                        Column(
-                                            Modifier.clickable { openTool(t) }.padding(vertical = 8.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally
+                                if (vp.isNotEmpty()) {
+                                    val p = vp[pIdx.coerceIn(0, vp.lastIndex)]
+                                    val discrete = p.max - p.min <= 7f
+                                    Slider(
+                                        value = live[p.name] ?: p.def,
+                                        onValueChange = { live[p.name] = if (discrete) it.roundToInt().toFloat() else it },
+                                        valueRange = p.min..p.max,
+                                        steps = if (discrete && p.max - p.min > 1f) (p.max - p.min).toInt() - 1 else 0,
+                                        colors = SliderDefaults.colors(thumbColor = ACC, activeTrackColor = ACC),
+                                        modifier = Modifier.padding(horizontal = 20.dp)
+                                    )
+                                }
+                            }
+                            Row(
+                                Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Ico(Ic.close, TXT, 26.dp, Modifier.pressScale { tick(); active = null }.padding(8.dp))
+                                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                    when (tool.kind) {
+                                        "brush", "heal", "select", "liquify", "redeye" -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Ico(Ic.undo, ACC, 20.dp, Modifier.pressScale { tick(); undoTouch() }.padding(8.dp))
+                                            Txt(if (tool.kind == "select") "tap to add or select a point" else "touch the photo", Modifier, DIM, 12)
+                                        }
+                                        "crop" -> Txt("drag the handles", Modifier, DIM, 12)
+                                        "radial" -> Txt("drag to place · drag dots to resize", Modifier, DIM, 12)
+                                        "pick" -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (tool.id == "wb") Row(Modifier.pressScale { tick(); autoWb() }.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Ico(Ic.sparkle, ACC, 18.dp)
+                                                Txt("AUTO", Modifier, ACC, 13, true)
+                                            }
+                                            Txt(if (tool.id == "wb") "or tap a neutral spot" else "tap photo to pick a color", Modifier, DIM, 12)
+                                        }
+                                        "curves" -> Txt("drag to bend · double-tap a point to remove", Modifier, DIM, 12)
+                                        "grad" -> Txt("drag to place gradient · drag dots to adjust", Modifier, DIM, 12)
+                                        else -> if (tool.id == "text") Row(Modifier.pressScale { tick(); textDialog = true }.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Ico(Ic.pen, ACC, 18.dp)
+                                            Txt("Edit text", Modifier, ACC, 13, true)
+                                        }
+                                        else if (tool.id == "light") Row(Modifier.pressScale { tick(); autoTone() }.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Ico(Ic.sparkle, ACC, 18.dp)
+                                            Txt("AUTO TONE", Modifier, ACC, 13, true)
+                                        }
+                                        else Txt("swipe left/right to adjust · up/down to switch", Modifier, DIM, 12)
+                                    }
+                                }
+                                Ico(
+                                    Ic.check, ACC, 28.dp,
+                                    Modifier
+                                        .graphicsLayer { scaleX = checkScale.value; scaleY = checkScale.value }
+                                        .pressScale {
+                                            tick()
+                                            val op = liveOp
+                                            if (op != null && changed(op)) commit(ops + (if (op.tool == "range") op.copy(v = op.v + ("Show" to 0f)) else op))
+                                            scope.launch {
+                                                checkScale.animateTo(1.32f, tween(85))
+                                                checkScale.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy))
+                                            }
+                                            active = null
+                                        }
+                                        .padding(8.dp)
+                                )
+                            }
+                        }
+                    }
+                    else -> Column(Modifier.fillMaxWidth()) {
+                        Box(Modifier.fillMaxWidth().height(250.dp)) {
+                            AnimatedContent(
+                                targetState = tab,
+                                transitionSpec = {
+                                    val dir = if (targetState > initialState) 1 else -1
+                                    (fadeIn(tween(180)) + slideInHorizontally(spring(dampingRatio = Spring.DampingRatioNoBounce, stiffness = 460f)) { dir * it / 4 }) togetherWith
+                                        (fadeOut(tween(120)) + slideOutHorizontally(tween(140)) { -dir * it / 4 })
+                                },
+                                label = "tabContent"
+                            ) { curTab ->
+                                when (curTab) {
+                                    0 -> LooksRow(
+                                        prev, ops, userPresets,
+                                        onPick = { tick(); commit(it) },
+                                        onSave = {
+                                            tick()
+                                            if (Presets.portable(ops).isEmpty()) toast("Make some edits first")
+                                            else { presetName = ""; saveDialog = true }
+                                        },
+                                        onDelete = { tick(); Presets.remove(ctx, it); userPresets = Presets.load(ctx) }
+                                    )
+                                    1 -> Column(Modifier.fillMaxSize()) {
+                                        LazyRow(
+                                            Modifier.fillMaxWidth().padding(top = 8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            Ico(Ic.tool[t.id] ?: Ic.sparkle, TXT, 28.dp)
-                                            Text(t.label, color = TXT, fontSize = 10.sp, textAlign = TextAlign.Center, maxLines = 2)
+                                            items(listOf("All") + Tools.cats.keys.toList()) { c -> Chip(c, c == cat) { tick(); cat = c } }
+                                        }
+                                        val list = if (cat == "All") Tools.all else Tools.cats[cat].orEmpty().map { Tools.byId(it) }
+                                        LazyVerticalGrid(
+                                            GridCells.Fixed(4),
+                                            Modifier.fillMaxSize(),
+                                            contentPadding = PaddingValues(8.dp)
+                                        ) {
+                                            items(list, key = { it.id }) { t ->
+                                                Column(
+                                                    Modifier.pressScale { openTool(t) }.padding(vertical = 8.dp),
+                                                    horizontalAlignment = Alignment.CenterHorizontally
+                                                ) {
+                                                    Ico(Ic.tool[t.id] ?: Ic.sparkle, TXT, 28.dp)
+                                                    Text(t.label, color = TXT, fontSize = 10.sp, textAlign = TextAlign.Center, maxLines = 2)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    else -> Column(
+                                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Txt("Theme", Modifier.width(64.dp), DIM, 12)
+                                            listOf(Triple(Ic.system, "Auto", 0), Triple(Ic.moon, "Dark", 1), Triple(Ic.sun, "Light", 2)).forEach { (ic, nm, m) ->
+                                                IconChip(ic, nm, Pal.mode == m) { tick(); Pal.set(ctx, m) }
+                                            }
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Txt("Format", Modifier.width(64.dp), DIM, 12)
+                                            listOf("JPEG", "PNG", "WebP").forEachIndexed { i, nm -> Chip(nm, expFmt == i) { tick(); expFmt = i } }
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Txt("Size", Modifier.width(64.dp), DIM, 12)
+                                            listOf(100, 75, 50, 25).forEach { pc -> Chip("$pc%", expScale == pc) { tick(); expScale = pc } }
+                                        }
+                                        OutlinedTextField(
+                                            value = expWm, onValueChange = { expWm = it },
+                                            label = { Text("Watermark (optional)") }, singleLine = true,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                        if (expFmt != 1) Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Txt("Quality ${expQ.roundToInt()}", Modifier.width(100.dp), DIM, 12)
+                                            Slider(
+                                                value = expQ, onValueChange = { expQ = it }, valueRange = 40f..100f,
+                                                colors = SliderDefaults.colors(thumbColor = ACC, activeTrackColor = ACC),
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            Button(
+                                                onClick = { export(false) }, enabled = src != null && !exporting,
+                                                colors = ButtonDefaults.buttonColors(containerColor = ACC, contentColor = ONACC)
+                                            ) { Ico(Ic.save, ONACC, 20.dp); Spacer(Modifier.width(8.dp)); Text("Save to gallery") }
+                                            Button(
+                                                onClick = { export(true) }, enabled = src != null && !exporting,
+                                                colors = ButtonDefaults.buttonColors(containerColor = CHIP, contentColor = TXT)
+                                            ) { Ico(Ic.share, TXT, 20.dp); Spacer(Modifier.width(8.dp)); Text("Share") }
                                         }
                                     }
                                 }
                             }
-                            else -> Column(
-                                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Txt("Theme", Modifier.width(64.dp), DIM, 12)
-                                    listOf(Triple(Ic.system, "Auto", 0), Triple(Ic.moon, "Dark", 1), Triple(Ic.sun, "Light", 2)).forEach { (ic, nm, m) ->
-                                        IconChip(ic, nm, Pal.mode == m) { Pal.set(ctx, m) }
+                        }
+                        BoxWithConstraints(Modifier.fillMaxWidth().height(58.dp)) {
+                            val tabW = maxWidth / 3f
+                            val indOff by animateDpAsState(
+                                targetValue = tabW * tab + tabW * 0.3f,
+                                animationSpec = spring(dampingRatio = 0.85f, stiffness = 480f),
+                                label = "tabInd"
+                            )
+                            Row(Modifier.fillMaxSize()) {
+                                listOf("LOOKS" to Ic.sparkle, "TOOLS" to (Ic.tool["tune"] ?: Ic.sparkle), "EXPORT" to Ic.share).forEachIndexed { i, (s, ic) ->
+                                    val selected = tab == i
+                                    val col by animateColorAsState(if (selected) ACC else DIM, spring(stiffness = 600f), label = "tabCol")
+                                    Box(
+                                        Modifier.weight(1f).fillMaxHeight().pressScale { tick(); tab = i },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Ico(ic, col, 22.dp)
+                                            Txt(s, Modifier, col, 11, true)
+                                        }
                                     }
                                 }
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Txt("Format", Modifier.width(64.dp), DIM, 12)
-                                    listOf("JPEG", "PNG", "WebP").forEachIndexed { i, nm -> Chip(nm, expFmt == i) { expFmt = i } }
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Txt("Size", Modifier.width(64.dp), DIM, 12)
-                                    listOf(100, 75, 50, 25).forEach { pc -> Chip("$pc%", expScale == pc) { expScale = pc } }
-                                }
-                                OutlinedTextField(
-                                    value = expWm, onValueChange = { expWm = it },
-                                    label = { Text("Watermark (optional)") }, singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                if (expFmt != 1) Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Txt("Quality ${expQ.roundToInt()}", Modifier.width(100.dp), DIM, 12)
-                                    Slider(
-                                        value = expQ, onValueChange = { expQ = it }, valueRange = 40f..100f,
-                                        colors = SliderDefaults.colors(thumbColor = ACC, activeTrackColor = ACC),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Button(
-                                        onClick = { export(false) }, enabled = src != null,
-                                        colors = ButtonDefaults.buttonColors(containerColor = ACC, contentColor = ONACC)
-                                    ) { Ico(Ic.save, ONACC, 20.dp); Spacer(Modifier.width(8.dp)); Text("Save to gallery") }
-                                    Button(
-                                        onClick = { export(true) }, enabled = src != null,
-                                        colors = ButtonDefaults.buttonColors(containerColor = CHIP, contentColor = TXT)
-                                    ) { Ico(Ic.share, TXT, 20.dp); Spacer(Modifier.width(8.dp)); Text("Share") }
-                                }
                             }
-                        }
-                    }
-                    Row(Modifier.fillMaxWidth().height(58.dp)) {
-                        listOf("LOOKS" to Ic.sparkle, "TOOLS" to (Ic.tool["tune"] ?: Ic.sparkle), "EXPORT" to Ic.share).forEachIndexed { i, (s, ic) ->
                             Box(
-                                Modifier.weight(1f).fillMaxHeight().clickable { tab = i },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Ico(ic, if (tab == i) ACC else DIM, 22.dp)
-                                    Txt(s, Modifier, if (tab == i) ACC else DIM, 11, true)
-                                }
-                                if (tab == i) Box(
-                                    Modifier.align(Alignment.BottomCenter).fillMaxWidth(0.4f).height(3.dp).background(ACC)
-                                )
-                            }
+                                Modifier
+                                    .align(Alignment.BottomStart)
+                                    .offset(x = indOff)
+                                    .width(tabW * 0.4f)
+                                    .height(3.dp)
+                                    .background(ACC, RoundedCornerShape(1.5.dp))
+                            )
                         }
                     }
                 }
@@ -1279,13 +1562,18 @@ fun StackPanel(
 
 
 @Composable
-fun Chip(label: String, on: Boolean, onClick: () -> Unit) =
+fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
+    val bg by animateColorAsState(if (on) ACC else CHIP, spring(stiffness = 600f), label = "chipBg")
+    val fg by animateColorAsState(if (on) ONACC else TXT, spring(stiffness = 600f), label = "chipFg")
     Txt(
         label,
-        Modifier.background(if (on) ACC else CHIP, RoundedCornerShape(16.dp)).clickable(onClick = onClick)
+        Modifier
+            .pressScale(onClick = onClick)
+            .background(bg, RoundedCornerShape(16.dp))
             .padding(horizontal = 12.dp, vertical = 6.dp),
-        if (on) ONACC else TXT, 13, true
+        fg, 13, true
     )
+}
 
 @Composable
 fun Histo(bm: Bitmap, modifier: Modifier) {
@@ -1474,13 +1762,17 @@ fun Ico(@DrawableRes id: Int, tint: Color = TXT, size: Dp = 24.dp, modifier: Mod
 
 @Composable
 fun IconChip(@DrawableRes icon: Int, label: String, on: Boolean, onClick: () -> Unit) {
+    val bg by animateColorAsState(if (on) ACC else CHIP, spring(stiffness = 600f), label = "iconChipBg")
+    val fg by animateColorAsState(if (on) ONACC else TXT, spring(stiffness = 600f), label = "iconChipFg")
     Row(
-        Modifier.background(if (on) ACC else CHIP, RoundedCornerShape(16.dp)).clickable(onClick = onClick)
+        Modifier
+            .pressScale(onClick = onClick)
+            .background(bg, RoundedCornerShape(16.dp))
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Ico(icon, if (on) ONACC else TXT, 16.dp)
-        Txt(label, Modifier, if (on) ONACC else TXT, 13, true)
+        Ico(icon, fg, 16.dp)
+        Txt(label, Modifier, fg, 13, true)
     }
 }
