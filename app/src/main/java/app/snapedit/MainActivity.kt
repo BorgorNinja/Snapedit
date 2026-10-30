@@ -90,6 +90,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.platform.LocalDensity
@@ -277,6 +278,9 @@ fun App(act: MainActivity) {
     val ctx = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val hitPx = with(LocalDensity.current) { 44.dp.toPx() }
+    val vStepPx = with(LocalDensity.current) { 48.dp.toPx() }
+    val hStepPx = with(LocalDensity.current) { 28.dp.toPx() }
+    val paramListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var src by remember { mutableStateOf<Bitmap?>(null) }
     var prev by remember { mutableStateOf<Bitmap?>(null) }
@@ -294,6 +298,7 @@ fun App(act: MainActivity) {
     var showStack by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
     var savedBanner by remember { mutableStateOf(false) }
+    var touchPos by remember { mutableStateOf<Offset?>(null) }
     val checkScale = remember { Animatable(1f) }
     val strokes = remember { mutableStateListOf<BrushStroke>() }
     val pts = remember { mutableStateListOf<Pt>() }
@@ -1210,7 +1215,7 @@ fun App(act: MainActivity) {
                     Txt(fmt(tool, p, live[p.name] ?: p.def), Modifier, ACC, 15, true)
                 }
             }
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = exporting,
                 enter = fadeIn(tween(150)),
                 exit = fadeOut(tween(200)),
@@ -1222,7 +1227,7 @@ fun App(act: MainActivity) {
                     trackColor = Color.Transparent
                 )
             }
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = savedBanner,
                 enter = fadeIn(tween(180)) + slideInVertically { it },
                 exit = fadeOut(tween(180)) + slideOutVertically { it },
@@ -1251,13 +1256,13 @@ fun App(act: MainActivity) {
             Modifier
                 .fillMaxWidth()
                 .background(BAR)
-                .animateContentSize(spring(dampingRatio = Spring.DampingRatioNoBounce, stiffness = Spring.StiffnessMediumLow))
+                .animateContentSize(spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
         ) {
             AnimatedContent(
                 targetState = panelMode,
                 transitionSpec = {
                     (fadeIn(tween(180, easing = LinearOutSlowInEasing)) +
-                        slideInVertically(spring(dampingRatio = Spring.DampingRatioNoBounce, stiffness = 420f)) { it / 5 }) togetherWith
+                        slideInVertically(spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 420f)) { it / 5 }) togetherWith
                         (fadeOut(tween(120)) + slideOutVertically(tween(140)) { it / 6 })
                 },
                 label = "bottomPanel"
@@ -1442,7 +1447,7 @@ fun App(act: MainActivity) {
                                 targetState = tab,
                                 transitionSpec = {
                                     val dir = if (targetState > initialState) 1 else -1
-                                    (fadeIn(tween(180)) + slideInHorizontally(spring(dampingRatio = Spring.DampingRatioNoBounce, stiffness = 460f)) { dir * it / 4 }) togetherWith
+                                    (fadeIn(tween(180)) + slideInHorizontally(spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 460f)) { dir * it / 4 }) togetherWith
                                         (fadeOut(tween(120)) + slideOutHorizontally(tween(140)) { -dir * it / 4 })
                                 },
                                 label = "tabContent"
