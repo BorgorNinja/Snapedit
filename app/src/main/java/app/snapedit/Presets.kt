@@ -6,7 +6,7 @@ import org.json.JSONObject
 
 /** User-saved "Looks" (Lightroom presets). Only global adjustments are stored, never crop/local edits. */
 object Presets {
-    private val excluded = setOf("crop", "rotate", "liquify", "brush", "select", "heal", "text", "frames", "redeye")
+    private val excluded = setOf("crop", "rotate", "liquify", "brush", "draw", "select", "heal", "text", "frames", "redeye", "flare")
 
     fun portable(ops: List<Op>): List<Op> = ops.filter { it.tool !in excluded }
 

@@ -8,12 +8,13 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.RectF
 import kotlin.math.*
 import kotlin.random.Random
 
 data class Param(val name: String, val min: Float, val max: Float, val def: Float, val hidden: Boolean = false)
 data class Tool(val id: String, val icon: String, val label: String, val params: List<Param>, val kind: String = "swipe")
-data class BrushStroke(val pts: List<Float>, val r: Float, val erase: Boolean)
+data class BrushStroke(val pts: List<Float>, val r: Float, val erase: Boolean, val color: Int = 0xFFFFFFFF.toInt(), val glow: Float = 0f)
 data class Pt(val x: Float, val y: Float, val r: Float, val br: Float, val co: Float, val sa: Float)
 data class Spot(val x: Float, val y: Float, val r: Float)
 data class Warp(val x: Float, val y: Float, val dx: Float, val dy: Float, val r: Float, val mode: Int, val k: Float)
@@ -49,8 +50,9 @@ object Tools {
         Tool("presence", "🔆", "Presence", listOf(sym("Texture"), sym("Clarity"), sym("Dehaze"), sym("Vibrance"))),
         Tool("denoise", "🧹", "Noise Reduction", listOf(pos("Luminance"), pos("Color"), pos("Detail", 50f))),
         Tool("grad", "▤", "Graduated", listOf(sym("Exposure"), sym("Contrast"), sym("Saturation"), sym("Warmth"), sym("Highlights"), sym("Shadows"), Param("X0", 0f, 1f, 0.5f, true), Param("Y0", 0f, 1f, 0.25f, true), Param("X1", 0f, 1f, 0.5f, true), Param("Y1", 0f, 1f, 0.6f, true)), "grad"),
-        Tool("liquify", "🌀", "Liquify", listOf(Param("Mode", 0f, 2f, 0f), Param("Size", 2f, 100f, 25f), pos("Strength", 50f)), "liquify"),
+        Tool("liquify", "🌀", "Liquify", listOf(Param("Mode", 0f, 4f, 0f), Param("Size", 2f, 100f, 25f), pos("Strength", 50f)), "liquify"),
         Tool("brush", "🖌️", "Brush", listOf(Param("Effect", 0f, 3f, 0f), sym("Strength", 50f), Param("Size", 1f, 100f, 15f), Param("Erase", 0f, 1f, 0f)), "brush"),
+        Tool("draw", "🖍️", "Draw", listOf(Param("Color", 0f, 7f, 0f), Param("Size", 1f, 100f, 18f), pos("Glow", 50f), pos("Opacity", 95f), Param("Erase", 0f, 1f, 0f)), "brush"),
         Tool("select", "🎯", "Selective", listOf(sym("Brightness"), sym("Contrast"), sym("Saturation"), Param("Size", 5f, 100f, 30f)), "select"),
         Tool("heal", "🩹", "Healing", listOf(Param("Size", 2f, 100f, 20f)), "heal"),
         Tool("text", "🔤", "Text", listOf(Param("X", 0f, 100f, 50f), Param("Y", 0f, 100f, 50f), Param("Size", 1f, 100f, 30f), Param("Opacity", 0f, 100f, 100f), Param("Color", 0f, 5f, 0f))),
@@ -59,6 +61,7 @@ object Tools {
         Tool("optics", "🔭", "Lens", listOf(sym("Distortion"), sym("Vignetting"), pos("Defringe Purple"), pos("Defringe Green"))),
         Tool("radial", "◎", "Radial", listOf(sym("Exposure"), sym("Contrast"), sym("Highlights"), sym("Shadows"), sym("Saturation"), sym("Warmth"), pos("Feather", 50f), Param("Invert", 0f, 1f, 0f), Param("CX", 0f, 1f, 0.5f, true), Param("CY", 0f, 1f, 0.5f, true), Param("RX", 0f, 1f, 0.3f, true), Param("RY", 0f, 1f, 0.25f, true)), "radial"),
         Tool("range", "🎛️", "Range Mask", listOf(Param("Mode", 0f, 1f, 0f), pos("Low", 0f), pos("High", 100f), Param("Hue", 0f, 360f, 0f), pos("Width", 30f), pos("Feather", 30f), sym("Exposure"), sym("Contrast"), sym("Saturation"), sym("Warmth"), Param("Show", 0f, 1f, 0f)), "pick"),
+        Tool("splash", "💧", "Color Splash", listOf(Param("Hue", 0f, 360f, 0f), pos("Tolerance", 30f), pos("Vividness", 35f), sym("Brightness"), Param("Show", 0f, 1f, 0f)), "pick"),
         Tool("redeye", "👁️", "Red Eye", listOf(Param("Size", 2f, 100f, 15f)), "redeye"),
         Tool("tonal", "◑", "Tonal Contrast", listOf(pos("High", 40f), pos("Mid", 30f), pos("Low", 20f))),
         Tool("hdr", "🏔️", "HDR Scape", listOf(pos("Strength", 50f), sym("Saturation"))),
@@ -71,16 +74,23 @@ object Tools {
         Tool("bw", "⚫", "Black & White", listOf(Param("Filter", 0f, 7f, 0f), sym("Brightness"), sym("Contrast"), pos("Grain"))),
         Tool("blur", "💧", "Lens Blur", listOf(pos("Blur", 40f), pos("Transition", 50f))),
         Tool("vignette", "⭕", "Vignette", listOf(sym("Amount", -50f), pos("Midpoint", 50f), sym("Roundness"), pos("Feather", 50f), pos("Highlights"))),
-        Tool("frames", "🖼️", "Frames", listOf(pos("Size", 5f), Param("Color", 0f, 1f, 0f)))
+        Tool("frames", "🖼️", "Frames", listOf(pos("Size", 5f), Param("Color", 0f, 5f, 0f), pos("Radius", 0f), pos("Shadow", 0f))),
+        Tool("neon", "⚡", "Neon Glow", listOf(pos("Strength", 65f), Param("Hue", 0f, 360f, 300f), pos("Glow", 50f))),
+        Tool("sketch", "✏️", "Sketch", listOf(pos("Pencil", 70f), sym("Contrast", 20f), pos("Color", 0f))),
+        Tool("popart", "🎭", "Pop Art", listOf(Param("Style", 0f, 3f, 0f), Param("Levels", 2f, 8f, 4f), pos("Strength", 80f))),
+        Tool("drip", "🟣", "Bloom & Drip", listOf(pos("Bloom", 60f), Param("Hue", 0f, 360f, 285f), pos("Drip", 40f))),
+        Tool("flare", "🌟", "Lens Flare", listOf(pos("Strength", 55f), Param("Hue", 0f, 360f, 35f), pos("Streak", 60f), pos("Rays", 50f), Param("X", 0f, 1f, 0.72f, true), Param("Y", 0f, 1f, 0.28f, true)), "flare"),
+        Tool("leak", "🔶", "Light Leak", listOf(Param("Style", 0f, 3f, 0f), pos("Strength", 50f), Param("Hue", 0f, 360f, 25f)))
     )
 
     fun byId(id: String) = all.first { it.id == id }
 
     val cats: Map<String, List<String>> = linkedMapOf(
         "Light" to listOf("tune", "light", "curves", "tonal", "hdr"),
-        "Color" to listOf("wb", "hsl", "grade", "bw"),
+        "Color" to listOf("wb", "hsl", "grade", "splash", "bw"),
+        "Magic" to listOf("neon", "sketch", "popart", "drip", "flare", "leak", "draw"),
         "Detail" to listOf("details", "sharpen", "presence", "denoise", "optics", "blur"),
-        "Local" to listOf("select", "radial", "grad", "brush", "range", "heal", "redeye"),
+        "Local" to listOf("select", "radial", "grad", "brush", "draw", "range", "splash", "heal", "redeye"),
         "Geometry" to listOf("crop", "rotate", "persp", "liquify"),
         "Creative" to listOf("glow", "drama", "vintage", "grain", "retro", "noir", "vignette", "frames", "text")
     )
@@ -95,9 +105,11 @@ object Tools {
         "Portrait" to listOf(op("tune", "Brightness" to 5f, "Ambiance" to 20f, "Shadows" to 15f, "Warmth" to 5f), op("details", "Sharpening" to 20f)),
         "Smooth" to listOf(op("tune", "Contrast" to -10f, "Highlights" to -10f, "Shadows" to 20f), op("details", "Structure" to -25f)),
         "Pop" to listOf(op("tune", "Contrast" to 25f, "Saturation" to 35f, "Ambiance" to 20f)),
+        "Cyberpunk" to listOf(op("grade", "Shadow Hue" to 260f, "Shadow Sat" to 55f, "High Hue" to 315f, "High Sat" to 50f), op("neon", "Strength" to 45f, "Hue" to 305f, "Glow" to 60f)),
         "Accentuate" to listOf(op("tune", "Contrast" to 15f, "Highlights" to -20f, "Shadows" to 25f, "Ambiance" to 30f), op("details", "Structure" to 30f)),
         "Fine Art" to listOf(op("tune", "Contrast" to 20f, "Saturation" to -20f, "Highlights" to -30f), op("tonal")),
         "Push" to listOf(op("tune", "Contrast" to 30f, "Saturation" to 30f, "Warmth" to 15f), op("vignette")),
+        "Golden Leak" to listOf(op("tune", "Brightness" to 8f, "Warmth" to 20f), op("leak", "Style" to 0f, "Strength" to 45f, "Hue" to 28f)),
         "Morning" to listOf(op("tune", "Brightness" to 10f, "Warmth" to 25f, "Ambiance" to 15f), op("glow", "Glow" to 30f)),
         "Faded" to listOf(op("vintage"), op("glow", "Glow" to 30f)),
         "Noir" to listOf(op("noir"))
@@ -137,8 +149,10 @@ object Engine {
             "optics" -> optics(b, g("Distortion"), g("Vignetting"), g("Defringe Purple"), g("Defringe Green"))
             "radial" -> radialOp(b, o)
             "range" -> rangeOp(b, o)
+            "splash" -> splashOp(b, g("Hue"), g("Tolerance"), g("Vividness"), g("Brightness"), g("Show") > 0.5f)
             "redeye" -> redEye(b, o.spots)
             "brush" -> brush(b, o.strokes, g("Effect").roundToInt(), g("Strength"))
+            "draw" -> drawOp(b, o.strokes, g("Opacity"))
             "select" -> selective(b, o.pts)
             "heal" -> heal(b, o.spots)
             "text" -> textOp(b, o)
@@ -162,7 +176,13 @@ object Engine {
             "bw" -> grain(bw(b, g("Filter").roundToInt(), g("Brightness"), g("Contrast")), g("Grain"))
             "blur" -> lensBlur(b, g("Blur"), g("Transition"))
             "vignette" -> vignettePro(b, g("Amount"), g("Midpoint"), g("Roundness"), g("Feather"), g("Highlights"))
-            "frames" -> frames(b, g("Size"), g("Color") > 0.5f)
+            "frames" -> framesPro(b, g("Size"), g("Color").roundToInt(), g("Radius"), g("Shadow"))
+            "neon" -> neonOp(b, g("Strength"), g("Hue"), g("Glow"))
+            "sketch" -> sketchOp(b, g("Pencil"), g("Contrast"), g("Color"))
+            "popart" -> popArtOp(b, g("Style").roundToInt(), g("Levels").roundToInt(), g("Strength"))
+            "drip" -> bloomDripOp(b, g("Bloom"), g("Hue"), g("Drip"))
+            "flare" -> flareOp(b, g("X"), g("Y"), g("Strength"), g("Hue"), g("Streak"), g("Rays"))
+            "leak" -> leakProOp(b, g("Style").roundToInt(), g("Strength"), g("Hue"))
             else -> b
         }
     }
@@ -983,7 +1003,21 @@ object Engine {
                 when (wp.mode) {
                     0 -> { sx = x - wp.dx * w * f; sy = y - wp.dy * h * f }
                     1 -> { sx = cx + (x - cx) * (1f - wp.k * f); sy = cy + (y - cy) * (1f - wp.k * f) }
-                    else -> { sx = cx + (x - cx) * (1f + wp.k * f); sy = cy + (y - cy) * (1f + wp.k * f) }
+                    2 -> { sx = cx + (x - cx) * (1f + wp.k * f); sy = cy + (y - cy) * (1f + wp.k * f) }
+                    3 -> {
+                        val sf = (1f - d * d).coerceAtLeast(0f)
+                        sx = x - wp.dx * w * sf * 1.6f
+                        sy = y - wp.dy * h * sf * 1.6f
+                    }
+                    else -> {
+                        val ang = wp.k * f * 4.5f
+                        val cs = cos(ang)
+                        val sn = sin(ang)
+                        val rx = x - cx
+                        val ry = y - cy
+                        sx = cx + rx * cs - ry * sn
+                        sy = cy + rx * sn + ry * cs
+                    }
                 }
                 nxt[i] = bil(cur, w, h, sx, sy)
             }
@@ -1348,5 +1382,402 @@ object Engine {
         val bk = (-(p05 - 0.02f) * 400f).coerceIn(-50f, 20f)
         val co = if (p995 - p05 < 0.8f) 15f else 5f
         return floatArrayOf(ex, co, hi, sh, wh, bk)
+    }
+
+    // ---------- v5 PicsArt creative & magic tools ----------
+    val drawColors = intArrayOf(
+        0xFFFFFFFF.toInt(), 0xFFFF2A85.toInt(), 0xFF00E5FF.toInt(), 0xFFFFEA00.toInt(),
+        0xFFFF3D00.toInt(), 0xFF00E676.toInt(), 0xFFB388FF.toInt(), 0xFF141414.toInt()
+    )
+
+    private val frameColors = intArrayOf(
+        0xFFFFFFFF.toInt(), 0xFF141414.toInt(), 0xFFF7F2E7.toInt(),
+        0xFF2B2D31.toInt(), 0xFFD4AF37.toInt(), 0xFF1F6FEB.toInt()
+    )
+
+    private fun framesPro(b: Bitmap, size: Float, colorIdx: Int, radius: Float, shadow: Float): Bitmap {
+        if (size <= 0f && radius <= 0f && shadow <= 0f) return b
+        val w = b.width.toFloat()
+        val h = b.height.toFloat()
+        val m = min(w, h)
+        val pad = m * (size / 100f) * 0.18f
+        val radPx = m * (radius / 100f) * 0.22f
+        val shPx = m * (shadow / 100f) * 0.06f
+        val out = Bitmap.createBitmap(b.width, b.height, Bitmap.Config.ARGB_8888)
+        val cv = Canvas(out)
+        cv.drawColor(frameColors[colorIdx.coerceIn(0, frameColors.lastIndex)])
+        val dst = RectF(pad, pad, w - pad, h - pad)
+        if (shPx > 0.5f) {
+            val sp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF000000.toInt()
+                setShadowLayer(shPx, 0f, shPx * 0.35f, 0xAA000000.toInt())
+            }
+            cv.drawRoundRect(dst, radPx, radPx, sp)
+        }
+        val save = cv.save()
+        if (radPx > 0.5f) {
+            val clip = Path().apply { addRoundRect(dst, radPx, radPx, Path.Direction.CW) }
+            cv.clipPath(clip)
+        }
+        cv.drawBitmap(b, null, dst, Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG))
+        cv.restoreToCount(save)
+        return out
+    }
+
+    private fun drawOp(b: Bitmap, strokes: List<BrushStroke>, opacity: Float): Bitmap {
+        if (strokes.isEmpty() || opacity <= 0f) return b
+        val w = b.width
+        val h = b.height
+        val m = min(w, h).toFloat()
+        val mb = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val cv = Canvas(mb)
+        for (st in strokes) {
+            val rad = max(1.5f, st.r * m)
+            val path = Path()
+            if (st.pts.size >= 4) {
+                path.moveTo(st.pts[0] * w, st.pts[1] * h)
+                var i = 2
+                while (i + 1 < st.pts.size) {
+                    path.lineTo(st.pts[i] * w, st.pts[i + 1] * h)
+                    i += 2
+                }
+            }
+            if (!st.erase && st.glow > 0f) {
+                val gp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = if (st.pts.size < 4) Paint.Style.FILL else Paint.Style.STROKE
+                    strokeCap = Paint.Cap.ROUND
+                    strokeJoin = Paint.Join.ROUND
+                    strokeWidth = rad * (1.8f + st.glow / 100f * 1.8f)
+                    color = st.color
+                    alpha = (st.glow * 1.9f).toInt().coerceIn(20, 220)
+                    maskFilter = BlurMaskFilter(max(2f, rad * (0.4f + st.glow / 100f * 1.1f)), BlurMaskFilter.Blur.NORMAL)
+                }
+                if (st.pts.size < 4) cv.drawCircle(st.pts[0] * w, st.pts[1] * h, rad * 1.5f, gp)
+                else cv.drawPath(path, gp)
+            }
+            val lp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = if (st.pts.size < 4) Paint.Style.FILL else Paint.Style.STROKE
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+                strokeWidth = rad * 1.2f
+                color = if (st.glow > 35f && !st.erase) {
+                    val c = st.color
+                    (0xFF shl 24) or (mix(c, -1, 16, 0.45f) shl 16) or (mix(c, -1, 8, 0.45f) shl 8) or mix(c, -1, 0, 0.45f)
+                } else st.color
+                if (st.erase) xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+            }
+            if (st.pts.size < 4) cv.drawCircle(st.pts[0] * w, st.pts[1] * h, rad * 0.6f, lp)
+            else cv.drawPath(path, lp)
+        }
+        val out = b.copy(Bitmap.Config.ARGB_8888, true)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { alpha = (opacity / 100f * 255f).toInt().coerceIn(0, 255) }
+        Canvas(out).drawBitmap(mb, 0f, 0f, p)
+        return out
+    }
+
+    private fun neonOp(b: Bitmap, strength: Float, hue: Float, glowAmt: Float): Bitmap {
+        if (strength <= 0f) return b
+        val w = b.width
+        val h = b.height
+        val p = pxOf(b)
+        val lumArr = FloatArray(w * h) { i ->
+            val v = p[i]
+            (0.299f * ch(v, 16) + 0.587f * ch(v, 8) + 0.114f * ch(v, 0)) / 255f
+        }
+        val c1 = FloatArray(3)
+        val c2 = FloatArray(3)
+        hsvToRgb(hue, 0.95f, 1f, c1)
+        hsvToRgb((hue + 135f) % 360f, 0.95f, 1f, c2)
+        val edgePx = IntArray(w * h)
+        val st = strength / 100f
+        for (y in 1 until h - 1) {
+            val r0 = (y - 1) * w
+            val r1 = y * w
+            val r2 = (y + 1) * w
+            for (x in 1 until w - 1) {
+                val gx = -lumArr[r0 + x - 1] + lumArr[r0 + x + 1] -
+                    2f * lumArr[r1 + x - 1] + 2f * lumArr[r1 + x + 1] -
+                    lumArr[r2 + x - 1] + lumArr[r2 + x + 1]
+                val gy = -lumArr[r0 + x - 1] - 2f * lumArr[r0 + x] - lumArr[r0 + x + 1] +
+                    lumArr[r2 + x - 1] + 2f * lumArr[r2 + x] + lumArr[r2 + x + 1]
+                val mag = (sqrt(gx * gx + gy * gy) * 1.8f).coerceIn(0f, 1f)
+                val e = smooth((mag - 0.08f) / 0.65f)
+                val t = (x.toFloat() / w * 0.6f + y.toFloat() / h * 0.4f).coerceIn(0f, 1f)
+                val nr = (c1[0] * (1f - t) + c2[0] * t) * e
+                val ng = (c1[1] * (1f - t) + c2[1] * t) * e
+                val nb = (c1[2] * (1f - t) + c2[2] * t) * e
+                edgePx[r1 + x] = (0xFF shl 24) or (to8(nr) shl 16) or (to8(ng) shl 8) or to8(nb)
+            }
+        }
+        val glowPx = if (glowAmt > 0f) blurPx(edgePx, w, h, max(3, (min(w, h) / 35f * (glowAmt / 100f)).roundToInt())) else edgePx
+        val gk = glowAmt / 100f * 1.35f
+        val dim = 1f - st * 0.35f
+        val out = IntArray(w * h)
+        for (i in p.indices) {
+            val v = p[i]
+            val e = edgePx[i]
+            val gl = glowPx[i]
+            val br = ch(v, 16) * dim / 255f
+            val bg = ch(v, 8) * dim / 255f
+            val bb = ch(v, 0) * dim / 255f
+            val er = (ch(e, 16) + ch(gl, 16) * gk) / 255f * st
+            val eg = (ch(e, 8) + ch(gl, 8) * gk) / 255f * st
+            val eb = (ch(e, 0) + ch(gl, 0) * gk) / 255f * st
+            val or = 1f - (1f - br) * (1f - er.coerceIn(0f, 1f))
+            val og = 1f - (1f - bg) * (1f - eg.coerceIn(0f, 1f))
+            val ob = 1f - (1f - bb) * (1f - eb.coerceIn(0f, 1f))
+            out[i] = (0xFF shl 24) or (to8(or) shl 16) or (to8(og) shl 8) or to8(ob)
+        }
+        return bmpOf(out, w, h)
+    }
+
+    private fun sketchOp(b: Bitmap, pencil: Float, contrast: Float, colorMix: Float): Bitmap {
+        if (pencil <= 0f) return b
+        val w = b.width
+        val h = b.height
+        val p = pxOf(b)
+        val inv = IntArray(w * h)
+        val gray = IntArray(w * h)
+        for (i in p.indices) {
+            val v = p[i]
+            val l = (0.299f * ch(v, 16) + 0.587f * ch(v, 8) + 0.114f * ch(v, 0)).roundToInt().coerceIn(0, 255)
+            gray[i] = l
+            val iv = 255 - l
+            inv[i] = (0xFF shl 24) or (iv shl 16) or (iv shl 8) or iv
+        }
+        val rad = max(2, (min(w, h) / 28f * (pencil / 100f)).roundToInt())
+        val bl = blurPx(inv, w, h, rad)
+        val cf = 1f + contrast / 100f * 0.8f
+        val cm = colorMix / 100f
+        val out = IntArray(w * h)
+        for (i in p.indices) {
+            val g = gray[i]
+            val bv = ch(bl[i], 0)
+            val dodge = min(255f, g * 255f / max(1, 255 - bv)) / 255f
+            val sk = ((dodge - 0.5f) * cf + 0.5f).coerceIn(0f, 1f)
+            val v = p[i]
+            val r = sk * (1f - cm) + (ch(v, 16) / 255f * sk) * cm
+            val gg = sk * (1f - cm) + (ch(v, 8) / 255f * sk) * cm
+            val bb = sk * (1f - cm) + (ch(v, 0) / 255f * sk) * cm
+            out[i] = (0xFF shl 24) or (to8(r) shl 16) or (to8(gg) shl 8) or to8(bb)
+        }
+        return bmpOf(out, w, h)
+    }
+
+    private fun popArtOp(b: Bitmap, style: Int, levels: Int, strength: Float): Bitmap {
+        if (strength <= 0f) return b
+        val lv = levels.coerceIn(2, 8).toFloat()
+        val k = strength / 100f
+        // Palettes: [shadowRGB, midRGB, highRGB]
+        val pal = when (style.coerceIn(0, 3)) {
+            0 -> arrayOf(floatArrayOf(0.08f, 0.05f, 0.28f), floatArrayOf(0.98f, 0.15f, 0.55f), floatArrayOf(0.05f, 0.95f, 0.98f))
+            1 -> arrayOf(floatArrayOf(0.10f, 0.14f, 0.48f), floatArrayOf(0.92f, 0.18f, 0.18f), floatArrayOf(1.00f, 0.92f, 0.15f))
+            2 -> arrayOf(floatArrayOf(0.18f, 0.04f, 0.32f), floatArrayOf(0.55f, 0.12f, 0.88f), floatArrayOf(0.55f, 1.00f, 0.12f))
+            else -> arrayOf(floatArrayOf(0.05f, 0.25f, 0.32f), floatArrayOf(0.95f, 0.38f, 0.15f), floatArrayOf(1.00f, 0.85f, 0.35f))
+        }
+        return map(b) { _, _, c ->
+            val l = lum(c).coerceIn(0f, 1f)
+            val ql = (floor(l * lv) / (lv - 1f)).coerceIn(0f, 1f)
+            val pr: Float
+            val pg: Float
+            val pb: Float
+            if (ql < 0.5f) {
+                val u = ql * 2f
+                pr = pal[0][0] + (pal[1][0] - pal[0][0]) * u
+                pg = pal[0][1] + (pal[1][1] - pal[0][1]) * u
+                pb = pal[0][2] + (pal[1][2] - pal[0][2]) * u
+            } else {
+                val u = (ql - 0.5f) * 2f
+                pr = pal[1][0] + (pal[2][0] - pal[1][0]) * u
+                pg = pal[1][1] + (pal[2][1] - pal[1][1]) * u
+                pb = pal[1][2] + (pal[2][2] - pal[1][2]) * u
+            }
+            c[0] = c[0] * (1f - k) + pr * k
+            c[1] = c[1] * (1f - k) + pg * k
+            c[2] = c[2] * (1f - k) + pb * k
+        }
+    }
+
+    private fun bloomDripOp(b: Bitmap, bloom: Float, hue: Float, drip: Float): Bitmap {
+        if (bloom <= 0f && drip <= 0f) return b
+        val w = b.width
+        val h = b.height
+        val p = pxOf(b)
+        val tint = FloatArray(3)
+        hsvToRgb(hue, 0.85f, 1f, tint)
+        val hi = IntArray(w * h)
+        for (i in p.indices) {
+            val v = p[i]
+            val r = ch(v, 16) / 255f
+            val g = ch(v, 8) / 255f
+            val bb = ch(v, 0) / 255f
+            val l = 0.299f * r + 0.587f * g + 0.114f * bb
+            val m = smooth((l - 0.45f) / 0.45f)
+            val hr = (r * 0.5f + tint[0] * 0.5f) * m
+            val hg = (g * 0.5f + tint[1] * 0.5f) * m
+            val hb = (bb * 0.5f + tint[2] * 0.5f) * m
+            hi[i] = (0xFF shl 24) or (to8(hr) shl 16) or (to8(hg) shl 8) or to8(hb)
+        }
+        val bl = if (bloom > 0f) blurPx(hi, w, h, max(4, (min(w, h) / 22f * (bloom / 100f)).roundToInt())) else hi
+        val out = p.copyOf()
+        if (drip > 0f) {
+            val maxDrip = (h * 0.16f * (drip / 100f)).roundToInt().coerceAtLeast(1)
+            for (x in 0 until w) {
+                val colWave = 0.35f + 0.65f * (hash2(x / 7, 13) + 0.5f)
+                val colLen = (maxDrip * colWave).roundToInt()
+                if (colLen < 2) continue
+                var trailR = 0f
+                var trailG = 0f
+                var trailB = 0f
+                val decay = 1f - 1.5f / colLen
+                for (y in 0 until h) {
+                    val idx = y * w + x
+                    val hv = hi[idx]
+                    trailR = max(ch(hv, 16).toFloat(), trailR * decay)
+                    trailG = max(ch(hv, 8).toFloat(), trailG * decay)
+                    trailB = max(ch(hv, 0).toFloat(), trailB * decay)
+                    val v = out[idx]
+                    out[idx] = (0xFF shl 24) or
+                        (max(ch(v, 16), cl(trailR * 0.85f)) shl 16) or
+                        (max(ch(v, 8), cl(trailG * 0.85f)) shl 8) or
+                        max(ch(v, 0), cl(trailB * 0.85f))
+                }
+            }
+        }
+        val bk = bloom / 100f * 1.1f
+        for (i in out.indices) {
+            val v = out[i]
+            val g = bl[i]
+            out[i] = (0xFF shl 24) or
+                (screenCh(v, g, 16, bk) shl 16) or
+                (screenCh(v, g, 8, bk) shl 8) or
+                screenCh(v, g, 0, bk)
+        }
+        return bmpOf(out, w, h)
+    }
+
+    private fun splashOp(b: Bitmap, hue: Float, tol: Float, vivid: Float, br: Float, show: Boolean): Bitmap {
+        val wdt = tol / 100f * 85f + 4f
+        val ftd = max(6f, wdt * 0.45f)
+        val satBoost = 1f + vivid / 100f * 0.85f
+        val brAdd = br / 100f * 0.25f
+        return map(b) { _, _, c ->
+            val r = c[0]
+            val g = c[1]
+            val bl = c[2]
+            val mx = max(r, max(g, bl))
+            val mn = min(r, min(g, bl))
+            val d = mx - mn
+            var keep = 0f
+            if (d >= 0.025f) {
+                var hh = (when {
+                    mx == r -> ((g - bl) / d) % 6f
+                    mx == g -> (bl - r) / d + 2f
+                    else -> (r - g) / d + 4f
+                }) * 60f
+                if (hh < 0f) hh += 360f
+                var ad = abs(hh - hue)
+                if (ad > 180f) ad = 360f - ad
+                keep = (1f - smooth((ad - wdt) / ftd)) * smooth(d / mx * 4.5f)
+            }
+            val l = (0.299f * r + 0.587f * g + 0.114f * bl + brAdd).coerceIn(0f, 1f)
+            val vr = (l + (r - l) * satBoost + brAdd).coerceIn(0f, 1f)
+            val vg = (l + (g - l) * satBoost + brAdd).coerceIn(0f, 1f)
+            val vb = (l + (bl - l) * satBoost + brAdd).coerceIn(0f, 1f)
+            if (show) {
+                val m = 0.7f * keep
+                c[0] = l * (1f - m) + m
+                c[1] = l * (1f - m)
+                c[2] = l * (1f - m)
+            } else {
+                c[0] = l + (vr - l) * keep
+                c[1] = l + (vg - l) * keep
+                c[2] = l + (vb - l) * keep
+            }
+        }
+    }
+
+    private fun flareOp(b: Bitmap, fx: Float, fy: Float, strength: Float, hue: Float, streak: Float, rays: Float): Bitmap {
+        if (strength <= 0f) return b
+        val w = b.width
+        val h = b.height
+        val m = min(w, h).toFloat()
+        val cx = fx * w
+        val cy = fy * h
+        val gx = w - cx
+        val gy = h - cy
+        val k = strength / 100f
+        val sk = streak / 100f
+        val rk = rays / 100f
+        val fc = FloatArray(3)
+        val sc = FloatArray(3)
+        hsvToRgb(hue, 0.7f, 1f, fc)
+        hsvToRgb((hue + 190f) % 360f, 0.65f, 1f, sc)
+        return map(b) { x, y, c ->
+            val dx = (x - cx) / m
+            val dy = (y - cy) / m
+            val r = hypot(dx, dy)
+            val core = exp(-r * r * 55f)
+            val halo = exp(-r * 4.2f) * 0.65f
+            val ringD = abs(r - 0.28f)
+            val ring = exp(-ringD * ringD * 900f) * 0.22f
+            val gdx = (x - gx) / m
+            val gdy = (y - gy) / m
+            val gr = hypot(gdx, gdy)
+            val ghost = exp(-gr * gr * 38f) * 0.35f
+            val anamorphic = exp(-abs(dy) * 42f) * exp(-abs(dx) * 1.8f) * sk * 0.85f
+            val ang = atan2(dy, dx)
+            val star = (0.5f + 0.5f * cos(ang * 8f)).pow(6f) * exp(-r * 5.5f) * rk * 0.7f
+            val mainA = ((core + halo + star) * k).coerceIn(0f, 1.2f)
+            val secA = ((ring + ghost + anamorphic) * k).coerceIn(0f, 1f)
+            val ar = (core * 0.8f * k + fc[0] * mainA + sc[0] * secA).coerceIn(0f, 1f)
+            val ag = (core * 0.8f * k + fc[1] * mainA + sc[1] * secA).coerceIn(0f, 1f)
+            val ab = (core * 0.8f * k + fc[2] * mainA + sc[2] * secA).coerceIn(0f, 1f)
+            c[0] = 1f - (1f - c[0]) * (1f - ar)
+            c[1] = 1f - (1f - c[1]) * (1f - ag)
+            c[2] = 1f - (1f - c[2]) * (1f - ab)
+        }
+    }
+
+    private fun leakProOp(b: Bitmap, style: Int, strength: Float, hue: Float): Bitmap {
+        if (strength <= 0f) return b
+        val w = b.width.toFloat()
+        val h = b.height.toFloat()
+        val k = strength / 100f
+        val c1 = FloatArray(3)
+        val c2 = FloatArray(3)
+        hsvToRgb(hue, 0.9f, 1f, c1)
+        hsvToRgb((hue + 40f) % 360f, 0.8f, 1f, c2)
+        return map(b) { x, y, c ->
+            val nx = x / w
+            val ny = y / h
+            val t1: Float
+            val t2: Float
+            when (style.coerceIn(0, 3)) {
+                0 -> {
+                    t1 = (1f - nx / 0.65f).coerceAtLeast(0f).pow(1.8f)
+                    t2 = (1f - hypot(nx, ny - 0.3f) / 0.7f).coerceAtLeast(0f).pow(2f)
+                }
+                1 -> {
+                    t1 = ((nx - 0.35f) / 0.65f).coerceAtLeast(0f).pow(1.8f)
+                    t2 = (1f - nx / 0.45f).coerceAtLeast(0f).pow(2.2f) * 0.6f
+                }
+                2 -> {
+                    t1 = (1f - ny / 0.5f).coerceAtLeast(0f).pow(1.8f)
+                    t2 = ((ny - 0.5f) / 0.5f).coerceAtLeast(0f).pow(1.8f)
+                }
+                else -> {
+                    val d = (1f - (nx * 0.7f + ny * 0.7f)).coerceAtLeast(0f)
+                    t1 = d * d
+                    t2 = exp(-abs(nx + ny - 1f) * 6f) * 0.45f
+                }
+            }
+            val lr = (c1[0] * t1 + c2[0] * t2) * k
+            val lg = (c1[1] * t1 + c2[1] * t2) * k
+            val lb = (c1[2] * t1 + c2[2] * t2) * k
+            c[0] = 1f - (1f - c[0]) * (1f - lr.coerceIn(0f, 1f))
+            c[1] = 1f - (1f - c[1]) * (1f - lg.coerceIn(0f, 1f))
+            c[2] = 1f - (1f - c[2]) * (1f - lb.coerceIn(0f, 1f))
+        }
     }
 }

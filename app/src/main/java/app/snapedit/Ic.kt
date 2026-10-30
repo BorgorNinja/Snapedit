@@ -37,7 +37,15 @@ object Ic {
         "noir" to R.drawable.ic_tool_noir,
         "vignette" to R.drawable.ic_tool_vignette,
         "frames" to R.drawable.ic_tool_frames,
-        "text" to R.drawable.ic_tool_text
+        "text" to R.drawable.ic_tool_text,
+        "neon" to R.drawable.ic_tool_neon,
+        "sketch" to R.drawable.ic_tool_sketch,
+        "popart" to R.drawable.ic_tool_popart,
+        "drip" to R.drawable.ic_tool_drip,
+        "splash" to R.drawable.ic_tool_splash,
+        "flare" to R.drawable.ic_tool_flare,
+        "leak" to R.drawable.ic_tool_leak,
+        "draw" to R.drawable.ic_tool_draw
     )
     val open = R.drawable.ic_ui_open
     val undo = R.drawable.ic_ui_undo

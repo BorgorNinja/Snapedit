@@ -218,13 +218,16 @@ fun fmt(t: Tool, p: Param, v: Float): String {
         t.id == "rotate" -> if (i == 0) "Off" else "On"
         t.id == "hsl" && p.name == "Band" -> listOf("Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta")[i.coerceIn(0, 7)]
         t.id == "curves" -> listOf("RGB", "Red", "Green", "Blue")[i.coerceIn(0, 3)]
-        t.id == "liquify" && p.name == "Mode" -> listOf("Push", "Bloat", "Pinch")[i.coerceIn(0, 2)]
+        t.id == "liquify" && p.name == "Mode" -> listOf("Push", "Bloat", "Pinch", "Stretch", "Swirl")[i.coerceIn(0, 4)]
         t.id == "brush" && p.name == "Effect" -> listOf("Dodge", "Exposure", "Temp", "Saturation")[i.coerceIn(0, 3)]
-        t.id == "brush" && p.name == "Erase" -> if (i == 0) "Off" else "On"
+        (t.id == "brush" || t.id == "draw") && p.name == "Erase" -> if (i == 0) "Off" else "On"
+        t.id == "draw" && p.name == "Color" -> listOf("White", "Neon Pink", "Cyan", "Yellow", "Red", "Lime", "Violet", "Black")[i.coerceIn(0, 7)]
+        t.id == "popart" && p.name == "Style" -> listOf("Cyber", "Warhol", "Acid", "Sunset")[i.coerceIn(0, 3)]
+        t.id == "leak" && p.name == "Style" -> listOf("Left", "Right", "Cinema", "Corner")[i.coerceIn(0, 3)]
         t.id == "range" && p.name == "Mode" -> if (i == 0) "Luminance" else "Color"
-        (t.id == "range" && p.name == "Show") || (t.id == "radial" && p.name == "Invert") -> if (i == 0) "Off" else "On"
+        (t.id == "range" && p.name == "Show") || (t.id == "splash" && p.name == "Show") || (t.id == "radial" && p.name == "Invert") -> if (i == 0) "Off" else "On"
         t.id == "text" && p.name == "Color" -> listOf("White", "Black", "Yellow", "Red", "Blue", "Green")[i.coerceIn(0, 5)]
-        t.id == "frames" && p.name == "Color" -> if (i == 0) "White" else "Black"
+        t.id == "frames" && p.name == "Color" -> listOf("White", "Black", "Cream", "Charcoal", "Gold", "Blue")[i.coerceIn(0, 5)]
         p.min < 0f && i > 0 -> "+$i"
         else -> "$i"
     }
@@ -243,7 +246,7 @@ fun fit(bw: Float, bh: Float, iw: Int, ih: Int): FloatArray {
 }
 
 fun changed(op: Op): Boolean = when (op.tool) {
-    "brush" -> op.strokes.isNotEmpty()
+    "brush", "draw" -> op.strokes.isNotEmpty()
     "select" -> op.pts.isNotEmpty()
     "heal", "redeye" -> op.spots.isNotEmpty()
     "text" -> op.text.isNotBlank()
@@ -619,7 +622,9 @@ fun App(act: MainActivity) {
                 onDragStart = { o ->
                     touchPos = o
                     val n = norm(o)
-                    if (n != null) strokes.add(BrushStroke(listOf(n.x, n.y), (live["Size"] ?: 15f) / 100f * 0.2f, (live["Erase"] ?: 0f) > 0.5f))
+                    val col = Engine.drawColors[(live["Color"] ?: 0f).roundToInt().coerceIn(0, 7)]
+                    val gl = live["Glow"] ?: 0f
+                    if (n != null) strokes.add(BrushStroke(listOf(n.x, n.y), (live["Size"] ?: 15f) / 100f * 0.2f, (live["Erase"] ?: 0f) > 0.5f, col, gl))
                 },
                 onDragEnd = { touchPos = null },
                 onDragCancel = { touchPos = null }
@@ -726,7 +731,7 @@ fun App(act: MainActivity) {
                         val mode = (live["Mode"] ?: 0f).roundToInt()
                         val r = (live["Size"] ?: 25f) / 100f * 0.2f
                         val st = live["Strength"] ?: 50f
-                        if (mode == 0) warps.add(Warp(n.x, n.y, d.x / zoom / f[2] * st / 50f, d.y / zoom / f[3] * st / 50f, r, 0, 0f))
+                        if (mode == 0 || mode == 3) warps.add(Warp(n.x, n.y, d.x / zoom / f[2] * st / 50f, d.y / zoom / f[3] * st / 50f, r, mode, 0f))
                         else warps.add(Warp(n.x, n.y, 0f, 0f, r, mode, st / 100f * 0.08f))
                     }
                 }
@@ -736,7 +741,7 @@ fun App(act: MainActivity) {
                     touchPos = o
                     val n = norm(o)
                     val mode = (live["Mode"] ?: 0f).roundToInt()
-                    if (n != null && mode > 0) {
+                    if (n != null && mode in listOf(1, 2, 4)) {
                         tick()
                         warpMarks.add(warps.size)
                         warps.add(Warp(n.x, n.y, 0f, 0f, (live["Size"] ?: 25f) / 100f * 0.2f, mode, (live["Strength"] ?: 50f) / 100f * 0.3f))
@@ -864,6 +869,20 @@ fun App(act: MainActivity) {
                 }
             }
         }
+        "flare" -> Modifier
+            .pointerInput(tool) {
+                detectTapGestures { o ->
+                    val n = norm(o)
+                    if (n != null) { tick(); live["X"] = n.x; live["Y"] = n.y }
+                }
+            }
+            .pointerInput(tool) {
+                detectDragGestures { change, _ ->
+                    change.consume()
+                    val n = norm(change.position)
+                    if (n != null) { live["X"] = n.x; live["Y"] = n.y }
+                }
+            }
         else -> if (tool.id == "text") {
             Modifier
                 .pointerInput(tool) {
@@ -1099,6 +1118,11 @@ fun App(act: MainActivity) {
                         val ty = f[1] + (live["Y"] ?: 50f) / 100f * f[3]
                         drawCircle(Color(0xFF4DA3FF), 10f, Offset(tx, ty))
                         drawCircle(Color.White, 14f, Offset(tx, ty), style = Stroke(2.5f))
+                    } else if (tool.id == "flare") {
+                        val fx = f[0] + (live["X"] ?: 0.72f) * f[2]
+                        val fy = f[1] + (live["Y"] ?: 0.28f) * f[3]
+                        drawCircle(Color(0xFF4DA3FF), 11f, Offset(fx, fy))
+                        drawCircle(Color.White, 17f, Offset(fx, fy), style = Stroke(2.5f))
                     }
                 }
             }
@@ -1291,6 +1315,31 @@ fun App(act: MainActivity) {
                                             )
                                         }
                                     }
+                                } else if (tool.id == "draw") {
+                                    val cIdx = (live["Color"] ?: 0f).roundToInt().coerceIn(0, 7)
+                                    val er = (live["Erase"] ?: 0f) > 0.5f
+                                    val drawSwatches = listOf(
+                                        Color(0xFFFFFFFF), Color(0xFFFF2A85), Color(0xFF00E5FF), Color(0xFFFFEA00),
+                                        Color(0xFFFF3D00), Color(0xFF00E676), Color(0xFFB388FF), Color(0xFF141414)
+                                    )
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        drawSwatches.forEachIndexed { idx, sw ->
+                                            val selCol = idx == cIdx && !er
+                                            Box(
+                                                Modifier
+                                                    .size(24.dp)
+                                                    .pressScale { tick(); live["Color"] = idx.toFloat(); live["Erase"] = 0f }
+                                                    .background(sw, CircleShape)
+                                                    .border(if (selCol) 2.5.dp else 1.dp, if (selCol) ACC else DIM, CircleShape)
+                                            )
+                                        }
+                                        Spacer(Modifier.weight(1f))
+                                        Chip("Eraser", er) { tick(); live["Erase"] = if (er) 0f else 1f }
+                                    }
                                 }
                                 LazyRow(
                                     state = paramListState,
@@ -1351,6 +1400,7 @@ fun App(act: MainActivity) {
                                         }
                                         "curves" -> Txt("drag to bend · double-tap a point to remove", Modifier, DIM, 12)
                                         "grad" -> Txt("drag to place gradient · drag dots to adjust", Modifier, DIM, 12)
+                                        "flare" -> Txt("tap or drag photo to move lens flare", Modifier, DIM, 12)
                                         else -> if (tool.id == "text") Row(Modifier.pressScale { tick(); textDialog = true }.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                             Ico(Ic.pen, ACC, 18.dp)
                                             Txt("Edit text · drag photo to move", Modifier, ACC, 12, true)
@@ -1365,18 +1415,23 @@ fun App(act: MainActivity) {
                                 Ico(
                                     Ic.check, ACC, 28.dp,
                                     Modifier
+                                        .testTag("apply_tool")
                                         .graphicsLayer { scaleX = checkScale.value; scaleY = checkScale.value }
                                         .pressScale {
                                             tick()
                                             val op = liveOp
-                                            if (op != null && changed(op)) commit(ops + (if (op.tool == "range") op.copy(v = op.v + ("Show" to 0f)) else op))
+                                            if (op != null && changed(op)) {
+                                                val cleanOp = if (op.tool == "range" || op.tool == "splash") op.copy(v = op.v + ("Show" to 0f)) else op
+                                                commit(ops + cleanOp)
+                                            }
                                             scope.launch {
                                                 checkScale.animateTo(1.32f, tween(85))
                                                 checkScale.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy))
                                             }
                                             active = null
                                         }
-                                        .padding(8.dp)
+                                        .padding(8.dp),
+                                    "Apply Tool"
                                 )
                             }
                         }
@@ -1449,7 +1504,7 @@ fun App(act: MainActivity) {
                                         OutlinedTextField(
                                             value = expWm, onValueChange = { expWm = it },
                                             label = { Text("Watermark (optional)") }, singleLine = true,
-                                            modifier = Modifier.fillMaxWidth()
+                                            modifier = Modifier.testTag("watermark_input").fillMaxWidth()
                                         )
                                         if (expFmt != 1) Row(verticalAlignment = Alignment.CenterVertically) {
                                             Txt("Quality ${expQ.roundToInt()}", Modifier.width(100.dp), DIM, 12)
@@ -1522,7 +1577,7 @@ fun App(act: MainActivity) {
             },
             dismissButton = { TextButton(onClick = { saveDialog = false }) { Text("Cancel") } },
             title = { Text("Save as Look") },
-            text = { OutlinedTextField(value = presetName, onValueChange = { presetName = it }, singleLine = true, label = { Text("Name") }) }
+            text = { OutlinedTextField(value = presetName, onValueChange = { presetName = it }, singleLine = true, label = { Text("Name") }, modifier = Modifier.testTag("preset_name_input")) }
         )
     }
     if (infoDialog) {
@@ -1538,7 +1593,7 @@ fun App(act: MainActivity) {
             onDismissRequest = { textDialog = false },
             confirmButton = { TextButton(onClick = { textDialog = false }) { Text("OK") } },
             title = { Text("Text") },
-            text = { OutlinedTextField(value = textValue, onValueChange = { textValue = it }) }
+            text = { OutlinedTextField(value = textValue, onValueChange = { textValue = it }, modifier = Modifier.testTag("text_tool_input")) }
         )
     }
 }
@@ -1572,7 +1627,7 @@ fun LooksRow(
         return
     }
     LazyRow(
-        Modifier.fillMaxSize(),
+        Modifier.testTag("looks_row").fillMaxSize(),
         contentPadding = PaddingValues(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -1875,8 +1930,24 @@ fun ClipOverlay(bm: Bitmap, modifier: Modifier) {
 
 
 @Composable
-fun Ico(@DrawableRes id: Int, tint: Color = TXT, size: Dp = 24.dp, modifier: Modifier = Modifier) =
-    Icon(painterResource(id), contentDescription = null, tint = tint, modifier = modifier.size(size))
+fun Ico(@DrawableRes id: Int, tint: Color = TXT, size: Dp = 24.dp, modifier: Modifier = Modifier, desc: String? = null) =
+    Icon(
+        painterResource(id),
+        contentDescription = desc ?: when (id) {
+            Ic.undo -> "Undo"
+            Ic.redo -> "Redo"
+            Ic.compare -> "Compare"
+            Ic.histogram -> "Histogram"
+            Ic.layers -> "Edits Stack"
+            Ic.fit -> "Fit"
+            Ic.copy -> "Copy Edits"
+            Ic.paste -> "Paste Edits"
+            Ic.info -> "Photo Info"
+            else -> null
+        },
+        tint = tint,
+        modifier = modifier.size(size)
+    )
 
 @Composable
 fun IconChip(@DrawableRes icon: Int, label: String, on: Boolean, onClick: () -> Unit) {

@@ -50,25 +50,32 @@ Every edit in Snapedit is non-destructive: every slider, tone curve point, brush
 
 ### 4. Spatial, Selective & Inpainting Tools
 * **Selective Control Points:** Drop localized target points onto colors to selectively modify Brightness, Contrast, and Saturation within a radius (U-point style).
-* **Brush Masking:** Paint-on adjustments (Exposure, Dodge & Burn, Temperature, Saturation) with variable radius and erase mode.
+* **Color Splash:** Tap any color on the canvas to isolate and boost its vividness while cleanly desaturating the rest of the scene.
+* **Brush Masking & Neon Draw:** Paint-on adjustments (Exposure, Dodge & Burn, Temperature, Saturation) plus multi-color Neon Glow & Doodle brushes with live brush-size preview rings and eraser support.
 * **Graduated & Radial Filters:** Linear gradient and radial falloff masks with feathering and inversion options.
 * **Healing (Inpainting):** Content-aware spot and blemish remover with adjustable stamp brush radius.
 * **Red Eye Removal:** Target-tap pupil correction for portrait photography.
-* **Liquify:** Warping engine featuring Push, Bloat, and Reconstruct modes for gentle contour shaping.
+* **Liquify, Stretch & Swirl:** Warping engine featuring Push, Bloat, Pinch, Stretch, and Swirl vortex modes for contour shaping.
 
-### 5. Creative Looks & Film Simulation
+### 5. Magic Effects, Creative Looks & Film Simulation
+* **Magic Effects (PicsArt-inspired):**
+  * **Neon Glow:** Dual-tone Sobel edge extraction with customizable hue and soft outer neon halo.
+  * **Sketch:** Color-dodge pencil sketch engine with adjustable stroke softness, contrast, and colored-pencil blend.
+  * **Pop Art:** Multi-level posterization with Cyber, Warhol, Acid, and Sunset duotone/tritone palettes.
+  * **Bloom & Drip:** Highlight bloom diffusion combined with vertical chromatic paint drip trails.
+* **Lens Flare & Light Leaks:** Draggable multi-element optical lens flare (anamorphic streaks, starburst rays, ghost rings) and 4 directional film light leak styles.
 * **HDR Scape:** High Dynamic Range simulation with natural exposure blending.
 * **Glamour Glow & Drama:** Soft glow diffusion and high-impact gritty tonal treatments.
 * **Vintage & Retrolux:** Classic film emulsions, subtle light leaks, scratches, and age styling.
 * **Grainy Film & Noir:** Authentic analog photographic silver-halide grain and high-contrast monochrome cinema looks.
 * **Black & White:** Grayscale conversion powered by colored optical filter simulations (Neutral, Red, Orange, Yellow, Green).
-* **Frames & Typography:** Customizable photographic borders, clean text overlays, and alignment controls.
+* **Frames Pro & Typography:** Customizable borders with palette colors, rounded inner corners, drop shadows, and on-canvas draggable text overlays.
 
 ### 6. Workflow, Stacks & Looks
-* **Non-destructive Edit Stack:** View the full layer stack of applied tools; toggle visibility of any past adjustment or re-enter and refine past parameters without losing subsequent edits.
-* **User Looks (Presets):** Save your active adjustment recipes to the device and apply them to any subsequent photo in one tap.
-* **Dynamic Theming:** Seamless system, dark, and light mode themes with custom runtime-tinted monochrome vector iconography.
-* **Before / After Comparison:** Long-press anywhere on the preview canvas to toggle instant real-time before/after comparison.
+* **Non-destructive Edit Stack:** View the full layer stack of applied tools; reorder or remove any past adjustment without losing subsequent edits.
+* **User Looks (Presets):** Toggle built-in or saved custom adjustment recipes in one tap with active look indicators.
+* **Fluid Motion & Haptics:** Spring-animated panels, gliding tab indicators, tactile press-scale feedback, and smooth crop aspect morphing.
+* **Interactive Split-Wipe Comparison:** Tap Compare for a draggable before/after split-screen wipe divider, or long-press for instant full-frame comparison.
 
 ---
 
