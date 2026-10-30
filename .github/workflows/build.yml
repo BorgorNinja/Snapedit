@@ -62,7 +62,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
-            set -eo pipefail
+            set -e
             adb wait-for-device
             adb shell input keyevent 82
             adb logcat -c
