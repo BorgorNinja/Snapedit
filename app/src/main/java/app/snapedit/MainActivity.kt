@@ -972,6 +972,7 @@ fun App(act: MainActivity) {
         // Image area
         Box(
             Modifier.weight(1f).fillMaxWidth().background(STAGE)
+                .testTag("image_stage")
                 .onSizeChanged { boxSize = it }
                 .pointerInput(Unit) {
                     // two-finger pinch zoom + pan (consumed first so tools don't react)
@@ -1295,7 +1296,7 @@ fun App(act: MainActivity) {
                                     Spacer(Modifier.weight(1f))
                                     Txt("RESET", Modifier.pressScale { tick(); curvePts[chn] = listOf(0f, 0f, 1f, 1f) }.padding(6.dp), DIM, 12, true)
                                 }
-                                CurveEditor(curvePts[chn], chn, { curvePts[chn] = it }, Modifier.padding(12.dp).fillMaxWidth().height(170.dp))
+                                CurveEditor(curvePts[chn], chn, { curvePts[chn] = it }, Modifier.testTag("curve_editor").padding(12.dp).fillMaxWidth().height(170.dp))
                             } else {
                                 if (tool.id == "text") {
                                     val cIdx = (live["Color"] ?: 0f).roundToInt().coerceIn(0, 5)
@@ -1379,7 +1380,7 @@ fun App(act: MainActivity) {
                                         valueRange = p.min..p.max,
                                         steps = if (discrete && p.max - p.min > 1f) (p.max - p.min).toInt() - 1 else 0,
                                         colors = SliderDefaults.colors(thumbColor = ACC, activeTrackColor = ACC),
-                                        modifier = Modifier.padding(horizontal = 20.dp)
+                                        modifier = Modifier.testTag("param_slider").padding(horizontal = 20.dp)
                                     )
                                 }
                             }
@@ -1387,7 +1388,7 @@ fun App(act: MainActivity) {
                                 Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 16.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Ico(Ic.close, TXT, 26.dp, Modifier.pressScale { tick(); active = null }.padding(8.dp))
+                                Ico(Ic.close, TXT, 26.dp, Modifier.testTag("cancel_tool").pressScale { tick(); active = null }.padding(8.dp), "Cancel Tool")
                                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                                     when (tool.kind) {
                                         "brush", "heal", "select", "liquify", "redeye" -> Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1465,7 +1466,7 @@ fun App(act: MainActivity) {
                                     )
                                     1 -> Column(Modifier.fillMaxSize()) {
                                         LazyRow(
-                                            Modifier.fillMaxWidth().padding(top = 8.dp),
+                                            Modifier.testTag("category_row").fillMaxWidth().padding(top = 8.dp),
                                             contentPadding = PaddingValues(horizontal = 10.dp),
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
@@ -1474,12 +1475,12 @@ fun App(act: MainActivity) {
                                         val list = if (cat == "All") Tools.all else Tools.cats[cat].orEmpty().map { Tools.byId(it) }
                                         LazyVerticalGrid(
                                             GridCells.Fixed(4),
-                                            Modifier.fillMaxSize(),
+                                            Modifier.testTag("tools_grid").fillMaxSize(),
                                             contentPadding = PaddingValues(8.dp)
                                         ) {
                                             items(list, key = { it.id }) { t ->
                                                 Column(
-                                                    Modifier.pressScale { openTool(t) }.padding(vertical = 8.dp),
+                                                    Modifier.testTag("tool_${t.id}").pressScale { openTool(t) }.padding(vertical = 8.dp),
                                                     horizontalAlignment = Alignment.CenterHorizontally
                                                 ) {
                                                     Ico(Ic.tool[t.id] ?: Ic.sparkle, TXT, 28.dp)
@@ -1489,7 +1490,7 @@ fun App(act: MainActivity) {
                                         }
                                     }
                                     else -> Column(
-                                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+                                        Modifier.testTag("export_scroll").fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
                                         verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
