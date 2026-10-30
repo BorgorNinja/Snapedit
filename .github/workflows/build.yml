@@ -62,51 +62,28 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
-            set -e
             adb wait-for-device
             adb shell input keyevent 82
             adb logcat -c
-
             echo "=== [1/3] Installing Debug & Test APKs for Automated Feature & UI Suite ==="
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-
             echo "=== [2/3] Running SnapEditAutomatedTest (All 43 Tools, Looks, Presets, Image Upload, Full UI & Export) ==="
-            adb shell am instrument -w -r \
-              -e class app.snapedit.SnapEditAutomatedTest \
-              app.snapedit.test/androidx.test.runner.AndroidJUnitRunner | tee out/test-artifacts/instrumented-test-output.txt
-
-            if ! grep -q "OK (2 tests)" out/test-artifacts/instrumented-test-output.txt; then
-              echo "Instrumented test suite failed!"
-              adb logcat -d *:E > out/test-artifacts/logcat-errors.txt || true
-              adb exec-out screencap -p > out/test-artifacts/failure-screen.png || true
-              exit 1
-            fi
-
-            adb exec-out screencap -p > out/test-artifacts/ui-test-final-screen.png || true
+            adb shell am instrument -w app.snapedit.test/androidx.test.runner.AndroidJUnitRunner > out/test-artifacts/instrumented-test-output.txt 2>&1
+            cat out/test-artifacts/instrumented-test-output.txt
+            grep -q "OK (2 tests)" out/test-artifacts/instrumented-test-output.txt && echo "Instrumented test suite PASSED" || { adb logcat -d *:E > out/test-artifacts/logcat-errors.txt; adb exec-out screencap -p > out/test-artifacts/failure-screen.png; echo "Instrumented test suite FAILED"; exit 1; }
+            adb exec-out screencap -p > out/test-artifacts/ui-test-final-screen.png
             adb pull /sdcard/Pictures/Snapedit out/test-artifacts/exported-gallery || true
-
             echo "=== [3/3] Verifying Produced Release APK Installation & Image Intent Launch ==="
             adb uninstall app.snapedit.test || true
             adb uninstall app.snapedit || true
             adb install -r out/Snapedit-Release.apk
-
-            # Upload sample image to emulator & trigger media scanner
             adb push assets/icon.png /sdcard/Pictures/ci_sample.png
             adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/ci_sample.png || true
-
-            # Launch Release APK MainActivity & verify it stays alive without fatal exceptions
             adb logcat -c
             adb shell am start -W -n app.snapedit/.MainActivity
             sleep 4
-
-            PID=$(adb shell pidof app.snapedit || true)
-            if [ -z "$PID" ]; then
-              echo "Release APK crashed or failed to start!"
-              adb logcat -d *:E > out/test-artifacts/release-crash-logcat.txt
-              exit 1
-            fi
-            echo "Release APK is running with PID: $PID"
+            [ -n "$(adb shell pidof app.snapedit)" ] && echo "Release APK is running with PID: $(adb shell pidof app.snapedit)" || { adb logcat -d *:E > out/test-artifacts/release-crash-logcat.txt; echo "Release APK crashed or failed to start"; exit 1; }
             adb exec-out screencap -p > out/test-artifacts/release-apk-launch.png
 
       - name: Upload Emulator Test Report & Screenshots
