@@ -377,6 +377,11 @@ class SnapEditAutomatedTest {
         }
         pump(400)
 
+        // From here on no infinite animations exist in the app (the pulsing "+" only runs while
+        // no photo is open), so re-enable the auto-advancing test clock. This is REQUIRED for
+        // performScrollToNode, whose Compose scroll machinery deadlocks with a paused clock.
+        composeRule.mainClock.autoAdvance = true
+
         // 3. Test Top Bar Histogram & Before/After Split Compare modes
         mark("ui-stage-3-histogram-compare")
         composeRule.onNodeWithContentDescription("Histogram").performClick()
@@ -574,14 +579,33 @@ class SnapEditAutomatedTest {
         // Watermark text entry is IME-based and covered functionally in the engine test; verify the field exists here.
         composeRule.onNodeWithTag("watermark_input").assertIsDisplayed()
         composeRule.onNodeWithTag("export_scroll").performScrollToNode(hasText("Save to gallery"))
+        mark("ui-stage-7b-click-save")
+
+        // Count current Snapedit exports in the gallery as the baseline
+        val beforeCount = snapeditGalleryCount(ctx)
         composeRule.onNodeWithText("Save to gallery").performClick()
 
-        // Wait for background export coroutine to finish and display confirmation banner
-        mark("ui-stage-7b-wait-export")
-        pumpUntil(timeoutMs = 15_000) {
-            composeRule.onAllNodesWithText("Saved to Pictures/Snapedit").fetchSemanticsNodes().isNotEmpty()
+        // Pause the clock while the indeterminate progress (infinite animation) is on screen,
+        // and verify the export by polling the MediaStore gallery (no idle syncs -> no deadlock).
+        mark("ui-stage-7c-wait-export")
+        composeRule.mainClock.autoAdvance = false
+        pumpUntil(timeoutMs = 30_000) {
+            runCatching { snapeditGalleryCount(ctx) > beforeCount }.getOrDefault(false)
         }
-        composeRule.onNodeWithText("Saved to Pictures/Snapedit").assertIsDisplayed()
+        assertTrue(
+            "Export should add a new image to Pictures/Snapedit (before=$beforeCount, after=${snapeditGalleryCount(ctx)})",
+            snapeditGalleryCount(ctx) > beforeCount
+        )
         mark("ui-test-passed")
     }
+
+    /** Counts images exported by Snapedit into Pictures/Snapedit via MediaStore query. */
+    private fun snapeditGalleryCount(ctx: android.content.Context): Int =
+        ctx.contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Images.Media._ID),
+            "${MediaStore.Images.Media.DISPLAY_NAME} LIKE 'Snapedit_%'",
+            null,
+            null
+        )?.use { it.count } ?: 0
 }
