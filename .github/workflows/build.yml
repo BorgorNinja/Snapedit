@@ -15,6 +15,7 @@ jobs:
   build:
     name: Build, Emulator Test & Release APK
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Source
@@ -69,6 +70,7 @@ jobs:
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             echo "=== [2/3] Running SnapEditAutomatedTest (All 43 Tools, Looks, Presets, Image Upload, Full UI & Export) ==="
+            ( adb logcat -v time > out/test-artifacts/live-logcat.txt 2>&1 & )
             adb shell am instrument -w app.snapedit.test/androidx.test.runner.AndroidJUnitRunner > out/test-artifacts/instrumented-test-output.txt 2>&1
             cat out/test-artifacts/instrumented-test-output.txt
             grep -q "OK (2 tests)" out/test-artifacts/instrumented-test-output.txt && echo "Instrumented test suite PASSED" || { adb logcat -d *:E > out/test-artifacts/logcat-errors.txt; adb exec-out screencap -p > out/test-artifacts/failure-screen.png; echo "Instrumented test suite FAILED"; exit 1; }
